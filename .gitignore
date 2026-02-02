@@ -1,0 +1,6 @@
+__pycache__/
+*.pkl
+venv/
+node_modules/
+.env
+*.parquet
