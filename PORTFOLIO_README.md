@@ -1,42 +1,37 @@
-# SupplySync AI: Autonomous Digital Twin Orchestrator
+# SupplySync AI
 
-[![Elite Tier Completion](https://img.shields.io/badge/Status-Elite--Tier--Complete-gold?style=for-the-badge)](https://github.com/Samarth7194/supplysync-ai)
+**Inventory optimization system combining classical supply chain methods with ML forecasting.**
 
-> **"From deterministic supply chains to autonomous, self-healing value chains."**
+## What This Demonstrates
 
-SupplySync AI is a **Level 5 Autonomous Resilience Engine** designed for global logistics at FAANG scale. It leverages a Sense-Reason-Plan-Act (SRPA) architecture to manage inventory, mitigate risks, and negotiate with external ecosystem nodes.
+- **Supply chain domain knowledge**: Correct use of Croston's method for intermittent demand, Z-score safety stock calculations, reorder point formulas, MOQ/order multiple constraints
+- **End-to-end ML pipeline**: Raw data (1M+ retail transactions) -> feature engineering -> LightGBM training -> evaluation -> deployed model serving forecasts
+- **Simulation-based validation**: 3-policy comparison (naive vs ML vs intelligent) producing real cost/service metrics, not hardcoded numbers
+- **Production patterns**: Service layer architecture, centralized model management, structured logging, comprehensive test suite (30 tests)
 
----
+## Key Results
 
-## 🚀 Key Performance Indicators (Phase 7/8 Audit)
+Measured via simulation on 10 high-volume SKUs from the UCI Online Retail II dataset:
 
-- **Decision Velocity**: **4.2 Seconds** latency for 1,000-scenario SMILP solve (via **Benders Decomposition**).
-- **HW Efficiency**: **+62% Throughput** gain via **Marlin-AWQ** 4-bit quantization on A100/H200.
-- **Resilience**: **99.7% Noise Filtration** against adversarial data poisoning events.
-- **Trust Layer**: **ED25519 Cryptographic Signatures** for Agent-to-Agent (A2A) negotiation.
+- **37.8% cost reduction** vs naive fixed-threshold policy
+- **95.7% fill rate** across simulated SKUs
+- **30 passing tests** covering reorder logic, forecasting, constraints, and simulation
 
----
+## Technical Approach
 
-## 🛠️ Architectural Stack
+**Adaptive forecasting** classifies each SKU by demand pattern and applies the best method:
+- Regular demand -> LightGBM with 7-day lags, rolling statistics, calendar features
+- Intermittent demand -> Croston's method (separate demand size and interval estimation)
+- Highly intermittent -> Conservative forecast with safety buffer
 
-### 1. The Core (LangGraph + SRPA)
-A centralized **OmniAgent Supervisor** orchestrates specialized workers (Triage, Enrichment, Remediation) through a bi-temporal memory graph.
+**Dynamic safety stock** replaces fixed sigma with rolling forecast error estimation, producing prediction intervals at P80/P90/P95 confidence levels.
 
-### 2. The Brain (TFT + GNN)
-- **Temporal Fusion Transformer**: Multi-horizon probabilistic forecasting.
-- **Graph Neural Networks**: Ripple analysis across deep-tier supplier networks.
+**Business constraints** are applied sequentially (MOQ, order multiples, max quantity) with cross-SKU budget optimization using greedy priority allocation.
 
-### 3. The Ecosystem (A2A)
-A secure **Ecosystem Gate** enables autonomous negotiation with supplier agents, using signed JSON schemas for non-repudiation.
+## Stack
 
----
-
-## 📊 Probabilistic Visualization
-Launch the Streamlit dashboard to view interactive Fan Charts and GNN Ripples:
-```bash
-streamlit run frontend/distributor_view.py
-```
+Python, FastAPI, LightGBM, pandas, Next.js, Tailwind CSS
 
 ---
 
-*Architected by Samarth (2026) | Elite-Tier AI Systems & Resilience Engineering*
+*Built by Samarth (2026)*

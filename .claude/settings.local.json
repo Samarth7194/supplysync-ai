@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(python scripts/train_model.py)",
+      "Bash(rm -rf \"D:/Samarth/Coding/Projects/supplysync-ai/backend/backend\")",
+      "Bash(python -c \"from services.model_service import ModelService; ms = ModelService.__new__\\(ModelService\\); ms._model_cache = {}; ms._model_service = None\")",
+      "Bash(python scripts/compute_kpis.py)",
+      "Bash(python -m pytest tests/ -v)",
+      "Bash(python -m pytest tests/ -v --tb=short)",
+      "Bash(python -c \":*)",
+      "mcp__Claude_Preview__preview_start"
+    ]
+  }
+}
