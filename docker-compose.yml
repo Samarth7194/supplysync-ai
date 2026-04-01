@@ -1,36 +1,32 @@
 version: '3.8'
 
 services:
-  api:
+  backend:
     build:
-      context: .
+      context: ./backend
       dockerfile: Dockerfile
     ports:
       - "8000:8000"
     environment:
       - MONGO_URI=mongodb://mongo:27017/supplysync
-      - MODEL_PATH=backend/saved_models
-      - LEAD_TIME_DAYS=7
-      - SERVICE_LEVEL=0.95
-      - HOLDING_COST=0.2
-      - STOCKOUT_COST=1.0
+      - MODEL_PATH=/app/saved_models
     volumes:
-      - ./backend:/app/backend
+      - ./backend:/app
       - ./data:/app/data
     depends_on:
       - mongo
     restart: unless-stopped
 
-  dashboard:
+  frontend:
     build:
-      context: ./dashboard
+      context: ./frontend
       dockerfile: Dockerfile
     ports:
-      - "8501:8501"
+      - "3000:3000"
     environment:
-      - API_BASE_URL=http://api:8000
+      - NEXT_PUBLIC_API_URL=http://localhost:8000
     depends_on:
-      - api
+      - backend
     restart: unless-stopped
 
   mongo:

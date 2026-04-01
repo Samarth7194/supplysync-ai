@@ -1,0 +1,59 @@
+# Core ML and Data Science
+pandas==2.0.3
+numpy==1.24.3
+scikit-learn==1.3.0
+lightgbm==4.1.0
+scipy==1.11.3
+
+# Deep Learning & Forecasting (Phase 2 & 4)
+torch>=2.0.0
+pytorch-lightning>=2.0.0
+pytorch-forecasting>=1.0.0
+transformers
+bitsandbytes
+peft
+
+# Agentic Orchestration (Phase 1)
+fastmcp
+browser-use
+langchain
+langgraph
+# pydantic handled by fastapi/fastmcp
+
+# Bi-Temporal Memory (Phase 3)
+graphiti-core
+
+# API and Web
+fastapi>=0.115.12
+uvicorn[standard]>=0.24.0
+pydantic>=2.11.7
+python-multipart>=0.0.6
+
+# Database and Storage
+pymongo>=4.6.0
+python-dotenv>=1.1.0
+
+# Visualization and Analysis
+matplotlib==3.7.2
+plotly==5.17.0
+seaborn==0.12.2
+
+# Utilities
+requests==2.31.0
+python-dateutil==2.8.2
+pyyaml==6.0.1
+jq  # Required for some validation hooks
+
+# Global Network Optimization (Phase 5)
+torch-geometric
+ortools
+simpy
+
+# Development and Testing
+pytest==7.4.3
+pytest-cov==4.1.0
+black==23.11.0
+flake8==6.1.0
+
+# Optional: Prophet for time series
+prophet==1.1.5
