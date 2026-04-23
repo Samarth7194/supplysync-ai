@@ -1,0 +1,908 @@
+"use client";
+
+import React, { useState, useEffect } from "react";
+import { useParams } from "next/navigation";
+import Link from "next/link";
+import {
+  BarChart,
+  Bar,
+  XAxis,
+  YAxis,
+  Tooltip,
+  ReferenceLine,
+  ResponsiveContainer,
+} from "recharts";
+import { ArrowLeft, Tags, TrendingUp, Shield, CheckCircle, AlertTriangle } from "lucide-react";
+import {
+  DataSourceBadge,
+  demandSourceKind,
+  forecastSourceKind,
+} from "@/components/DataSourceBadge";
+import type {
+  DemandSource,
+  ForecastSource,
+  DecisionBlock,
+  ModelInfo,
+  ExplanationBlock,
+} from "@/lib/api";
+import { EmptyState } from "@/components/EmptyState";
+import { InfoRow } from "@/components/InfoRow";
+import { SectionHeader } from "@/components/SectionHeader";
+import { env } from "@/lib/env";
+import {
+  getStockForSku,
+  setStockForSku,
+  getStockOrigin,
+  clearStockForSku,
+  type StockOrigin,
+} from "@/lib/stock";
+
+const API = env.apiUrl;
+const HISTORY_DAYS = 30;
+
+function computeDemoStock(avgDemand: number, index: number): number {
+  const multipliers = [0.3, 0.8, 2.0];
+  return Math.max(1, Math.round(avgDemand * multipliers[index % 3]));
+}
+
+function formatShortDate(iso?: string | null): string {
+  if (!iso) return "—";
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  return d.toISOString().slice(0, 10); // YYYY-MM-DD, tz-stable
+}
+
+interface SkuDetail {
+  id: string;
+  name: string;
+  avg_demand: number;
+  total_demand: number;
+}
+
+interface Analysis {
+  sku: string;
+  risk: string;
+  risk_color: string;
+  forecast: { p50: number; p90: number };
+  current_stock: number;
+  recommended_order: number;
+  action: string;
+  demand_pattern: string;
+  forecast_method: string;
+  demand_source?: DemandSource;
+  forecast_source?: ForecastSource;
+  decision?: DecisionBlock;
+  model_info?: ModelInfo;
+  explanation?: ExplanationBlock;
+}
+
+interface HistoryPoint {
+  date: string;
+  demand: number;
+}
+
+interface HistoryResponse {
+  sku: string;
+  available: boolean;
+  history: HistoryPoint[];
+}
+
+function RiskBadge({ risk }: { risk: string }) {
+  const styles: Record<string, string> = {
+    HIGH: "bg-red-500/15 text-red-400 border-red-500/30",
+    MEDIUM: "bg-yellow-500/15 text-yellow-400 border-yellow-500/30",
+    LOW: "bg-green-500/15 text-green-400 border-green-500/30",
+  };
+  return (
+    <span className={`text-sm font-semibold px-3 py-1 rounded-full border ${styles[risk] || styles.LOW}`}>
+      {risk} RISK
+    </span>
+  );
+}
+
+const PATTERN_REASONS: Record<string, string> = {
+  regular: "Less than 50% zero-demand days, consistent purchase pattern",
+  intermittent: "50-80% zero-demand days, sporadic but recurring purchases",
+  highly_intermittent: "Over 80% zero-demand days, very rare purchases",
+};
+
+export default function SKUDetail() {
+  const params = useParams();
+  const skuId = params.id as string;
+
+  const [skuInfo, setSkuInfo] = useState<SkuDetail | null>(null);
+  const [skuIndex, setSkuIndex] = useState(0);
+  const [analysis, setAnalysis] = useState<Analysis | null>(null);
+  const [history, setHistory] = useState<HistoryPoint[]>([]);
+  const [historyAvailable, setHistoryAvailable] = useState<boolean>(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  // Configurable business assumptions. Defaults match the backend defaults.
+  const [leadTimeDays, setLeadTimeDays] = useState<number>(7);
+  const [serviceLevelPct, setServiceLevelPct] = useState<number>(95);
+  const [reAnalyzing, setReAnalyzing] = useState(false);
+
+  // Current stock — user-editable, persisted per-SKU in localStorage.
+  // Initial value is the deterministic demo fallback; if the user has set a
+  // value for this SKU before, getStockForSku returns it instead.
+  const [currentStock, setCurrentStock] = useState<number>(0);
+  const [stockOrigin, setStockOrigin] = useState<StockOrigin>("demo");
+  const [stockDraft, setStockDraft] = useState<string>("");
+
+  async function fetchAnalysis(stock: number, lead: number, svcLevelPct: number) {
+    const body = {
+      sku: skuId,
+      current_stock: stock,
+      lead_time_days: lead,
+      service_level: svcLevelPct / 100,
+    };
+    const r = await fetch(`${API}/api/analyze`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(body),
+    });
+    if (!r.ok) throw new Error(`analyze failed: ${r.status}`);
+    return r.json();
+  }
+
+  useEffect(() => {
+    async function load() {
+      try {
+        const skuRes = await fetch(`${API}/api/skus/details`, { credentials: "include" }).then((r) => r.json());
+        const allSkus: SkuDetail[] = skuRes.skus || [];
+        const idx = allSkus.findIndex((s) => s.id === skuId);
+        const info = idx >= 0 ? allSkus[idx] : null;
+        setSkuInfo(info);
+        setSkuIndex(idx >= 0 ? idx : 0);
+
+        const demoStock = info ? computeDemoStock(info.avg_demand, idx) : 50;
+        const stock = getStockForSku(skuId, demoStock);
+        const origin = getStockOrigin(skuId);
+        setCurrentStock(stock);
+        setStockOrigin(origin);
+        setStockDraft(String(stock));
+
+        const [analyzeRes, historyRes] = await Promise.all([
+          fetchAnalysis(stock, leadTimeDays, serviceLevelPct),
+          fetch(`${API}/api/skus/${encodeURIComponent(skuId)}/history?days=${HISTORY_DAYS}`, {
+            credentials: "include",
+          })
+            .then<HistoryResponse>((r) =>
+              r.ok ? r.json() : { sku: skuId, available: false, history: [] },
+            )
+            .catch<HistoryResponse>(() => ({ sku: skuId, available: false, history: [] })),
+        ]);
+
+        setAnalysis(analyzeRes);
+        setHistory(historyRes.history ?? []);
+        setHistoryAvailable(Boolean(historyRes.available) && (historyRes.history?.length ?? 0) > 0);
+      } catch (e) {
+        console.error(e);
+        setError("Could not connect to the backend. Make sure the API server is running.");
+      }
+      setLoading(false);
+    }
+    load();
+    // We deliberately don't refetch on assumption change here — the
+    // Assumptions panel owns that via ``applyAssumptions`` below.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [skuId]);
+
+  async function applyAssumptions(nextStock: number, nextLead: number, nextSvcPct: number) {
+    if (!skuInfo && !currentStock) return;
+    setReAnalyzing(true);
+    try {
+      const next = await fetchAnalysis(nextStock, nextLead, nextSvcPct);
+      setAnalysis(next);
+      setCurrentStock(nextStock);
+      setLeadTimeDays(nextLead);
+      setServiceLevelPct(nextSvcPct);
+    } catch (e) {
+      console.error(e);
+      setError("Could not re-run analysis with the new assumptions.");
+    } finally {
+      setReAnalyzing(false);
+    }
+  }
+
+  function commitStockDraft() {
+    const parsed = Number(stockDraft);
+    if (!Number.isFinite(parsed) || parsed < 0) {
+      setStockDraft(String(currentStock));
+      return;
+    }
+    const next = Math.round(parsed);
+    if (next === currentStock && stockOrigin === "user") return;
+    setStockForSku(skuId, next);
+    setStockOrigin("user");
+    void applyAssumptions(next, leadTimeDays, serviceLevelPct);
+  }
+
+  function resetStockToDemo() {
+    clearStockForSku(skuId);
+    const demo = skuInfo ? computeDemoStock(skuInfo.avg_demand, skuIndex) : 50;
+    setStockDraft(String(demo));
+    setStockOrigin("demo");
+    void applyAssumptions(demo, leadTimeDays, serviceLevelPct);
+  }
+
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+        <div className="w-8 h-8 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
+  }
+
+  const stock = currentStock;
+  const name = skuInfo?.name || `SKU ${skuId}`;
+
+  return (
+    <div className="min-h-screen bg-gray-950 text-white">
+      {/* Header */}
+      <header className="sticky top-0 z-50 border-b border-gray-800 bg-gray-950/80 backdrop-blur-md">
+        <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
+          <div className="flex items-center gap-4">
+            <Link
+              href="/"
+              className="flex items-center gap-1.5 text-gray-400 hover:text-white transition-colors text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+            >
+              <ArrowLeft className="w-4 h-4" />
+              Dashboard
+            </Link>
+            <div className="h-5 w-px bg-gray-800" />
+            <div>
+              <h1 className="font-bold text-sm">{name}</h1>
+              <span className="text-xs text-gray-500 font-mono">{skuId}</span>
+            </div>
+          </div>
+          {analysis && <RiskBadge risk={analysis.risk} />}
+        </div>
+      </header>
+
+      <main className="max-w-6xl mx-auto px-6 py-8 space-y-6">
+        {error && (
+          <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-6 py-4 text-sm text-red-400 flex items-center justify-between">
+            <span>{error}</span>
+            <button onClick={() => setError(null)} className="text-red-400 hover:text-red-300 ml-4 font-bold">&times;</button>
+          </div>
+        )}
+        {analysis?.demand_source === "synthetic" && (
+          <div className="bg-amber-500/10 border border-amber-500/30 rounded-xl px-5 py-3 text-sm text-amber-200 flex items-start gap-3">
+            <AlertTriangle className="w-4 h-4 mt-0.5 text-amber-300 shrink-0" />
+            <div>
+              <p className="font-semibold text-amber-200">Demo data for unknown SKU</p>
+              <p className="text-xs text-amber-200/80 mt-1">
+                This SKU is not in the processed dataset. Demand, forecast, and reorder values below are generated
+                from a synthetic demand series for demonstration — they do not represent real operational data.
+              </p>
+            </div>
+          </div>
+        )}
+
+        {/* Analysis summary — the one-card "what matters first" block.
+            Recommendation dominates; pattern/forecast/input-data are the
+            supporting context underneath. */}
+        {analysis && (
+          <section
+            className="rounded-xl border-2 overflow-hidden"
+            style={{
+              borderColor: `${analysis.risk_color}40`,
+              background: `linear-gradient(180deg, ${analysis.risk_color}0c, transparent)`,
+            }}
+          >
+            <div className="px-6 py-5 flex flex-col md:flex-row md:items-center md:justify-between gap-5">
+              <div className="flex items-baseline gap-4 flex-wrap">
+                <div>
+                  <p
+                    className="text-[10px] font-semibold uppercase tracking-[0.18em]"
+                    style={{ color: analysis.risk_color }}
+                  >
+                    {analysis.action === "PURCHASE" ? "Recommended action" : "Current status"}
+                  </p>
+                  <p className="mt-1 flex items-baseline gap-3">
+                    {analysis.recommended_order > 0 ? (
+                      <>
+                        <span className="text-3xl md:text-[36px] font-bold text-white tracking-tight tabular-nums">
+                          Order {analysis.recommended_order}
+                        </span>
+                        <span className="text-sm text-gray-400">units</span>
+                      </>
+                    ) : (
+                      <span className="text-3xl md:text-[36px] font-bold text-white tracking-tight">
+                        No action needed
+                      </span>
+                    )}
+                  </p>
+                </div>
+              </div>
+              <div className="md:text-right">
+                <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-[0.18em]">
+                  Stock-out risk
+                </p>
+                <p
+                  className="text-lg font-semibold mt-1"
+                  style={{ color: analysis.risk_color }}
+                >
+                  {analysis.risk}
+                </p>
+              </div>
+            </div>
+            <div className="px-6 py-3 border-t border-gray-800/60 bg-gray-900/40 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500 uppercase tracking-wider text-[10px]">Pattern</span>
+                <span className="text-purple-300 font-medium">{analysis.demand_pattern}</span>
+              </div>
+              <div className="h-3 w-px bg-gray-800 hidden sm:block" />
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500 uppercase tracking-wider text-[10px]">Forecast</span>
+                <span className="text-cyan-300 font-medium">{analysis.forecast_method}</span>
+                <DataSourceBadge kind={forecastSourceKind(analysis.forecast_source)} />
+              </div>
+              <div className="h-3 w-px bg-gray-800 hidden sm:block" />
+              <div className="flex items-center gap-2">
+                <span className="text-gray-500 uppercase tracking-wider text-[10px]">Input data</span>
+                <DataSourceBadge kind={demandSourceKind(analysis.demand_source)} />
+              </div>
+            </div>
+          </section>
+        )}
+
+        {/* Planning assumptions — compact controls that re-run the analysis
+            so the user can see how recommendations change when lead time or
+            service level changes. */}
+        {analysis && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <SectionHeader
+              compact
+              eyebrow="Interactive"
+              title="Planning assumptions"
+              subtitle="Change a slider or type a real stock value. Releasing the slider or pressing Enter re-runs the backend analysis — reorder point, recommended quantity, and risk update live. Stock overrides persist locally in your browser."
+              right={
+                reAnalyzing ? (
+                  <span className="text-[11px] text-gray-400 inline-flex items-center gap-2">
+                    <span className="w-3 h-3 border-2 border-blue-500 border-t-transparent rounded-full animate-spin" />
+                    Re-analyzing…
+                  </span>
+                ) : (
+                  <span className="text-[11px] text-gray-600">Defaults: 7 days · 95%</span>
+                )
+              }
+            />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 mt-4">
+              <label className="block">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[11px] text-gray-500 uppercase tracking-wider">
+                    Lead time
+                  </span>
+                  <span className="text-sm text-white font-mono tabular-nums">
+                    {leadTimeDays}
+                    <span className="text-[10px] text-gray-500 ml-1">days</span>
+                    {leadTimeDays !== 7 && (
+                      <span className="text-[10px] text-amber-300 ml-2">
+                        {leadTimeDays > 7 ? "+" : ""}
+                        {leadTimeDays - 7} vs default
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={1}
+                  max={30}
+                  step={1}
+                  value={leadTimeDays}
+                  disabled={reAnalyzing}
+                  aria-label="Lead time in days"
+                  onChange={(e) => setLeadTimeDays(Number(e.target.value))}
+                  onMouseUp={() => applyAssumptions(currentStock, leadTimeDays, serviceLevelPct)}
+                  onTouchEnd={() => applyAssumptions(currentStock, leadTimeDays, serviceLevelPct)}
+                  onKeyUp={(e) => {
+                    if (e.key === "Enter" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                      applyAssumptions(currentStock, leadTimeDays, serviceLevelPct);
+                    }
+                  }}
+                  className="mt-2 w-full accent-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+                />
+                <div className="flex justify-between text-[10px] text-gray-600 mt-1">
+                  <span>1d</span>
+                  <span className="text-gray-500">7d default</span>
+                  <span>30d</span>
+                </div>
+              </label>
+              <label className="block">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[11px] text-gray-500 uppercase tracking-wider">
+                    Service level
+                  </span>
+                  <span className="text-sm text-white font-mono tabular-nums">
+                    {serviceLevelPct}%
+                    {serviceLevelPct !== 95 && (
+                      <span className="text-[10px] text-amber-300 ml-2">
+                        {serviceLevelPct > 95 ? "+" : ""}
+                        {serviceLevelPct - 95}pp vs default
+                      </span>
+                    )}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min={51}
+                  max={99}
+                  step={1}
+                  value={serviceLevelPct}
+                  disabled={reAnalyzing}
+                  aria-label="Target service level percentage"
+                  onChange={(e) => setServiceLevelPct(Number(e.target.value))}
+                  onMouseUp={() => applyAssumptions(currentStock, leadTimeDays, serviceLevelPct)}
+                  onTouchEnd={() => applyAssumptions(currentStock, leadTimeDays, serviceLevelPct)}
+                  onKeyUp={(e) => {
+                    if (e.key === "Enter" || e.key === "ArrowLeft" || e.key === "ArrowRight") {
+                      applyAssumptions(currentStock, leadTimeDays, serviceLevelPct);
+                    }
+                  }}
+                  className="mt-2 w-full accent-blue-500 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+                />
+                <div className="flex justify-between text-[10px] text-gray-600 mt-1">
+                  <span>51%</span>
+                  <span className="text-gray-500">95% default</span>
+                  <span>99%</span>
+                </div>
+              </label>
+              <label className="block">
+                <div className="flex items-baseline justify-between">
+                  <span className="text-[11px] text-gray-500 uppercase tracking-wider">
+                    Current stock
+                  </span>
+                  <span
+                    className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${
+                      stockOrigin === "user"
+                        ? "text-emerald-300 bg-emerald-500/10 border-emerald-500/30"
+                        : "text-gray-400 bg-gray-500/10 border-gray-500/30"
+                    }`}
+                    title={
+                      stockOrigin === "user"
+                        ? "You've set this value — stored locally in your browser."
+                        : "Demo value derived from this SKU's average demand."
+                    }
+                  >
+                    {stockOrigin === "user" ? "Stored locally" : "Demo value"}
+                  </span>
+                </div>
+                <input
+                  type="number"
+                  min={0}
+                  step={1}
+                  value={stockDraft}
+                  disabled={reAnalyzing}
+                  aria-label="Current stock on hand (units)"
+                  onChange={(e) => setStockDraft(e.target.value)}
+                  onBlur={commitStockDraft}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") {
+                      e.preventDefault();
+                      (e.target as HTMLInputElement).blur();
+                    } else if (e.key === "Escape") {
+                      e.preventDefault();
+                      setStockDraft(String(currentStock));
+                      (e.target as HTMLInputElement).blur();
+                    }
+                  }}
+                  className="mt-2 w-full bg-gray-950 border border-gray-700 rounded-lg px-3 py-2 text-sm text-white font-mono tabular-nums focus:outline-none focus:border-blue-500 focus-visible:ring-2 focus-visible:ring-blue-500"
+                />
+                <div className="flex justify-between items-center text-[10px] text-gray-600 mt-1">
+                  <span>units on hand</span>
+                  {stockOrigin === "user" ? (
+                    <button
+                      type="button"
+                      onClick={resetStockToDemo}
+                      disabled={reAnalyzing}
+                      className="text-gray-500 hover:text-gray-300 underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+                    >
+                      Reset to demo
+                    </button>
+                  ) : (
+                    <span className="text-gray-500">press Enter to apply</span>
+                  )}
+                </div>
+              </label>
+            </div>
+          </div>
+        )}
+
+        {/* Why this forecast path — deterministic, template-generated
+            explanations tied to the real routing and stock inputs. */}
+        {analysis?.explanation && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <SectionHeader
+              compact
+              eyebrow="Reasoning"
+              title="Why this forecast path"
+              subtitle="Deterministic explanations composed from the real inputs — no LLM, no fabricated confidence score."
+            />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-xs">
+              <div>
+                <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-1">
+                  Classification
+                </p>
+                <p className="text-gray-300 leading-relaxed">
+                  {analysis.explanation.classification_reason}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-1">
+                  Method choice
+                </p>
+                <p className="text-gray-300 leading-relaxed">
+                  {analysis.explanation.method_reason}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-1">
+                  Risk reasoning
+                </p>
+                <p className="text-gray-300 leading-relaxed">
+                  {analysis.explanation.risk_reason}
+                </p>
+              </div>
+            </div>
+            <p className="text-[11px] text-gray-500 border-t border-gray-800 pt-3 mt-5 leading-relaxed">
+              {analysis.explanation.confidence_note}
+            </p>
+          </div>
+        )}
+
+        <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
+          {/* Left: Chart (3 cols) */}
+          <div className="lg:col-span-3 bg-gray-900 border border-gray-800 rounded-xl p-6">
+            <SectionHeader
+              compact
+              eyebrow="Demand"
+              title={
+                <span className="inline-flex items-center gap-2">
+                  Historical demand
+                  {historyAvailable && (
+                    <span className="text-xs font-normal text-gray-500">
+                      · last {history.length} days
+                    </span>
+                  )}
+                  {analysis && (
+                    <DataSourceBadge kind={demandSourceKind(analysis.demand_source)} />
+                  )}
+                </span>
+              }
+              subtitle="Bars are recorded daily demand. Horizontal lines are the current forecast summary — move them with the Planning assumptions sliders above."
+              right={
+                analysis && (
+                  <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="w-2 h-2 rounded-sm bg-blue-500" /> Recorded
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="w-3 h-px bg-green-500" /> P50
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="w-3 h-px bg-red-500" /> P90
+                    </span>
+                  </div>
+                )
+              }
+            />
+            {analysis && historyAvailable ? (
+              <ResponsiveContainer width="100%" height={280}>
+                <BarChart data={history} margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
+                  <XAxis
+                    dataKey="date"
+                    tick={{ fill: "#6b7280", fontSize: 11 }}
+                    tickLine={false}
+                    axisLine={false}
+                    tickFormatter={(value: string) => value.slice(5)}
+                    minTickGap={24}
+                  />
+                  <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} tickLine={false} axisLine={false} width={40} />
+                  <Tooltip
+                    contentStyle={{ background: "#111827", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
+                    labelStyle={{ color: "#9ca3af" }}
+                    formatter={(value) => [value as number, "Recorded demand"]}
+                    labelFormatter={(label) => `Date: ${label as string}`}
+                  />
+                  <Bar dataKey="demand" name="Recorded demand" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                  <ReferenceLine
+                    y={analysis.forecast.p50}
+                    stroke="#22c55e"
+                    strokeDasharray="6 3"
+                    label={{ value: `P50 forecast: ${analysis.forecast.p50}`, position: "right", fill: "#22c55e", fontSize: 11 }}
+                  />
+                  <ReferenceLine
+                    y={analysis.forecast.p90}
+                    stroke="#ef4444"
+                    strokeDasharray="6 3"
+                    label={{ value: `P90 forecast: ${analysis.forecast.p90}`, position: "right", fill: "#ef4444", fontSize: 11 }}
+                  />
+                  <ReferenceLine
+                    y={stock}
+                    stroke="#eab308"
+                    label={{ value: `Stock: ${stock}`, position: "right", fill: "#eab308", fontSize: 11 }}
+                  />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <EmptyState
+                title="Historical demand unavailable"
+                hint={
+                  <>
+                    No recorded demand history was returned for this SKU. The recommendation
+                    on the right is still based on the backend&apos;s analysis; only this
+                    chart is hidden.
+                  </>
+                }
+                className="h-[280px]"
+              />
+            )}
+          </div>
+
+          {/* Right: Decision + Stats (2 cols) */}
+          <div className="lg:col-span-2 space-y-4">
+            {/* Decision rationale — complements the top hero with the full
+                human-readable "why". */}
+            {analysis && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                <SectionHeader
+                  compact
+                  eyebrow="Decision"
+                  title="Why this quantity"
+                />
+                {analysis.decision?.why ? (
+                  <p className="text-xs text-gray-300 leading-relaxed">
+                    {analysis.decision.why}
+                  </p>
+                ) : (
+                  <p className="text-xs text-gray-500">
+                    {analysis.action === "PURCHASE"
+                      ? `Order ${analysis.recommended_order} units to bring stock above the reorder point.`
+                      : "Current stock already covers the reorder point — no action needed."}
+                  </p>
+                )}
+              </div>
+            )}
+
+            {/* Stats Grid */}
+            {analysis && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                <SectionHeader compact eyebrow="Metrics" title="Key metrics" />
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-4">
+                  <div>
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <p className="text-[11px] text-gray-500 uppercase tracking-wider">
+                        Current stock
+                      </p>
+                      <DataSourceBadge kind={stockOrigin === "user" ? "user_stored" : "demo_value"} />
+                    </div>
+                    <p className="text-2xl font-bold tabular-nums mt-1">{stock}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-gray-500 uppercase tracking-wider">
+                      P50 forecast
+                    </p>
+                    <p className="text-2xl font-bold text-green-400 tabular-nums mt-1">
+                      {analysis.forecast.p50}
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-gray-500 uppercase tracking-wider">
+                      P90 forecast
+                    </p>
+                    <p className="text-2xl font-bold text-red-400 tabular-nums mt-1">
+                      {analysis.forecast.p90}
+                    </p>
+                  </div>
+                  <div>
+                    <p
+                      className="text-[11px] text-gray-500 uppercase tracking-wider"
+                      title="How much current stock undershoots the P90 demand scenario."
+                    >
+                      Shortfall vs P90
+                    </p>
+                    <p className="text-2xl font-bold text-yellow-400 tabular-nums mt-1">
+                      {Math.max(0, Math.round(analysis.forecast.p90 - stock))}
+                    </p>
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {/* Model & Method provenance — always truthful: for statistical
+                and rule-based paths we show the method name, not a fake
+                model identifier. */}
+            {analysis?.model_info && (
+              <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+                <SectionHeader compact eyebrow="Provenance" title="Model & method" />
+                <div className="space-y-2.5">
+                <InfoRow label="Name" value={analysis.model_info.model_name} />
+                <InfoRow
+                  label="Type"
+                  value={analysis.model_info.model_type.replace(/_/g, " ")}
+                  emphasis={
+                    analysis.model_info.model_type === "rule_based_fallback" ||
+                    analysis.model_info.model_type === "none"
+                      ? "warning"
+                      : "default"
+                  }
+                />
+                <InfoRow
+                  label="Artifact"
+                  value={analysis.model_info.artifact_available ? "loaded" : "not loaded"}
+                  emphasis={analysis.model_info.artifact_available ? "default" : "warning"}
+                />
+                {analysis.model_info.trained_at && (
+                  <InfoRow
+                    label="Trained"
+                    value={formatShortDate(analysis.model_info.trained_at)}
+                    hint={analysis.model_info.trained_at}
+                  />
+                )}
+                {typeof analysis.model_info.feature_count === "number" && (
+                  <InfoRow
+                    label="Features"
+                    value={analysis.model_info.feature_count}
+                  />
+                )}
+                {analysis.model_info.dataset && (
+                  <InfoRow
+                    label="Dataset"
+                    value={analysis.model_info.dataset}
+                    emphasis="muted"
+                  />
+                )}
+                <InfoRow
+                  label="Evaluation"
+                  value={
+                    analysis.model_info.evaluation_available
+                      ? `available (${formatShortDate(
+                          analysis.model_info.evaluation_generated_at ?? undefined
+                        )})`
+                      : "not generated"
+                  }
+                  emphasis={analysis.model_info.evaluation_available ? "muted" : "warning"}
+                />
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* How This Decision Was Made */}
+        {analysis && (
+          <section className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+            <SectionHeader
+              eyebrow="Pipeline"
+              title="How this decision was made"
+              subtitle="Four-step breakdown of the pipeline that produced the recommendation for this specific SKU."
+            />
+            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-4 gap-6">
+              {/* Step 1: Classify */}
+              <div className="flex gap-3">
+                <div className="flex flex-col items-center">
+                  <div className="w-9 h-9 rounded-lg bg-purple-600/20 flex items-center justify-center">
+                    <Tags className="w-4 h-4 text-purple-400" />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white">1. Classify</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Demand pattern:{" "}
+                    <span className="text-purple-400 font-medium">{analysis.demand_pattern}</span>.{" "}
+                    {PATTERN_REASONS[analysis.demand_pattern] || ""}
+                  </p>
+                </div>
+              </div>
+
+              {/* Step 2: Forecast */}
+              <div className="flex gap-3">
+                <div className="flex flex-col items-center">
+                  <div className="w-9 h-9 rounded-lg bg-cyan-600/20 flex items-center justify-center">
+                    <TrendingUp className="w-4 h-4 text-cyan-400" />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white">2. Forecast</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Method: <span className="text-cyan-400 font-medium">{analysis.forecast_method}</span>.
+                    {analysis.decision && (
+                      <>
+                        {" "}Projected demand over the next{" "}
+                        <span className="text-cyan-300 font-medium">
+                          {analysis.decision.lead_time_days} days
+                        </span>
+                        {" = "}
+                        <span className="text-cyan-300 font-medium">
+                          {analysis.decision.lead_time_demand} units
+                        </span>
+                        .
+                      </>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {/* Step 3: Safety Stock */}
+              <div className="flex gap-3">
+                <div className="flex flex-col items-center">
+                  <div className="w-9 h-9 rounded-lg bg-blue-600/20 flex items-center justify-center">
+                    <Shield className="w-4 h-4 text-blue-400" />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white">3. Safety Stock</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    {analysis.decision ? (
+                      <>
+                        Buffer of{" "}
+                        <span className="text-blue-300 font-medium">
+                          {analysis.decision.safety_stock} units
+                        </span>{" "}
+                        at{" "}
+                        <span className="text-blue-300 font-medium">
+                          {Math.round(analysis.decision.service_level * 100)}%
+                        </span>{" "}
+                        service level ({analysis.decision.safety_stock_method}). Reorder point ={" "}
+                        <span className="text-blue-300 font-medium">
+                          {analysis.decision.reorder_point}
+                        </span>
+                        .
+                      </>
+                    ) : (
+                      <>Safety stock sized from forecast error at 95% service level.</>
+                    )}
+                  </p>
+                </div>
+              </div>
+
+              {/* Step 4: Decision */}
+              <div className="flex gap-3">
+                <div className="flex flex-col items-center">
+                  <div className="w-9 h-9 rounded-lg bg-green-600/20 flex items-center justify-center">
+                    <CheckCircle className="w-4 h-4 text-green-400" />
+                  </div>
+                </div>
+                <div>
+                  <p className="text-sm font-semibold text-white">4. Decision</p>
+                  <p className="text-xs text-gray-400 mt-1">
+                    Current stock{" "}
+                    <span className="text-white font-medium">{stock}</span>{" "}
+                    {analysis.decision ? (
+                      analysis.recommended_order > 0 ? (
+                        <>
+                          is{" "}
+                          <span className="text-yellow-300 font-medium">
+                            {analysis.decision.inventory_gap}
+                          </span>{" "}
+                          below the reorder point → order{" "}
+                          <span className="text-green-400 font-medium">
+                            {analysis.recommended_order}
+                          </span>{" "}
+                          units.
+                        </>
+                      ) : (
+                        <>
+                          already covers the reorder point (
+                          {analysis.decision.reorder_point}) — no order.
+                        </>
+                      )
+                    ) : analysis.recommended_order > 0 ? (
+                      <> → order {analysis.recommended_order} units.</>
+                    ) : (
+                      <> → no action needed.</>
+                    )}
+                  </p>
+                </div>
+              </div>
+            </div>
+          </section>
+        )}
+      </main>
+    </div>
+  );
+}

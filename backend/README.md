@@ -1,0 +1,136 @@
+# SupplySync AI — backend
+
+FastAPI service that turns raw retail sales into inventory decisions. Adaptive forecasting (LightGBM / Croston / conservative buffer), Z-score safety stock, MOQ/order-multiple constraints, transparent provenance on every value.
+
+For the product pitch, quickstart, and architecture diagrams, see the **[root README](../README.md)** and **[docs/](../docs/)**. This file is the orientation for engineers reading the backend in isolation.
+
+---
+
+## Layout
+
+```
+backend/
+├── main.py                     # FastAPI app — all routes in one file
+├── requirements.txt
+├── .env.example                # All env vars documented here
+├── Dockerfile
+├── src/
+│   ├── auth/                   # HMAC session cookie + optional API-key gate
+│   ├── evaluation/             # MAE / RMSE / WAPE / MASE + baselines
+│   ├── features/               # Feature row builder for LightGBM inference
+│   ├── forecasting/            # LightGBM wrapper, Croston, moving-average fallback
+│   ├── ingestion/              # UCI CSV → cleaned daily-demand parquet
+│   ├── inventory/              # Safety stock, reorder point, order-qty constraints
+│   ├── services/               # AdaptiveForecastingService (the method router)
+│   ├── simulation/             # Day-by-day naive-vs-intelligent policy comparison
+│   ├── storage/                # SQLite analysis store
+│   └── uncertainty/            # Rolling forecast error → dynamic safety stock
+├── scripts/
+│   ├── check_setup.py          # Prints [OK] / [MISSING] per required artifact
+│   ├── bootstrap.py            # One-shot: trains + computes KPIs if missing
+│   ├── train_model.py          # Fits LightGBM on top-20 SKUs; writes .pkl + metadata
+│   ├── compute_kpis.py         # Naive vs intelligent cost simulation → cached KPIs
+│   ├── evaluate_forecast.py    # LightGBM vs 4 baselines on temporal split
+│   ├── evaluate_cross_sku.py   # NEW — unseen-SKU k-fold generalization test
+│   └── evaluate_custom_dataset.py  # NEW — zero-shot evaluation on any compatible CSV
+├── saved_models/               # lightgbm_demand_forecast.pkl + _metadata.json
+├── data/                       # cached_kpis.json, forecast_evaluation.{json,csv}, analyses.sqlite
+└── tests/                      # 100+ pytest cases
+```
+
+---
+
+## Running locally
+
+Requires Python 3.11+. From repo root:
+
+```bash
+make install        # installs backend + frontend deps
+make bootstrap      # trains model, computes KPIs, fills backend/data/
+make backend        # uvicorn on :8000 with --reload
+```
+
+Or directly:
+
+```bash
+cd backend
+pip install -r requirements.txt
+python scripts/bootstrap.py
+uvicorn main:app --reload --port 8000
+```
+
+Health check: `curl http://localhost:8000/health` — every flag should be `true` when the model is loaded and KPIs are computed.
+
+---
+
+## Retraining
+
+```bash
+cd backend
+python scripts/train_model.py
+```
+
+Writes `saved_models/lightgbm_demand_forecast.pkl` + `_metadata.json`. The live API picks up the new artifact on next startup.
+
+To train on a **different dataset**, set `DATA_CSV_PATH`:
+
+```bash
+DATA_CSV_PATH=/path/to/my_sales.csv python scripts/train_model.py
+```
+
+For non-UCI column names, pass a column mapping JSON. See **[docs/bring-your-own-data.md](../docs/bring-your-own-data.md)** for the full walkthrough.
+
+---
+
+## Evaluation
+
+Three evaluation entry points, each a standalone script:
+
+| Script | Answers |
+|---|---|
+| `evaluate_forecast.py` | "On the trained SKUs, does LightGBM beat the classical baselines on a temporal holdout?" |
+| `evaluate_cross_sku.py` | "If we hold out SKUs the model never saw, how does it compare to baselines?" |
+| `evaluate_custom_dataset.py` | "If I apply the current model to a different retail CSV, what do baselines vs LightGBM look like?" |
+
+All three write JSON into `backend/data/` and print a readable summary to stdout. The cross-SKU script is the honest generalization proof — see its output in `backend/data/cross_sku_evaluation.json`.
+
+---
+
+## Tests
+
+```bash
+make test                          # or: cd backend && python -m pytest tests/ -q
+```
+
+Test files are organized by responsibility — `test_inventory_logic.py` for the reorder math, `test_forecasting.py` for method routing, `test_api_*.py` for the FastAPI surface, `test_cross_sku_generalization.py` for unseen-SKU and column-mapping behavior, etc.
+
+---
+
+## Environment variables
+
+All documented in **[`.env.example`](./.env.example)**. Copy to `.env` or export in your shell. Key ones:
+
+- `MODEL_PATH` — where ModelService loads/saves the LightGBM artifact.
+- `AUTH_MODE` — `off` (default) or `demo` (adds an HMAC session cookie gate).
+- `ALLOWED_ORIGINS` — comma-separated CORS origins.
+- `ANALYSES_DB_PATH` — SQLite file for the persistent analysis log.
+- `DATA_CSV_PATH` / `DATA_PARQUET_PATH` — override the default UCI paths for bring-your-own-data workflows.
+
+---
+
+## Where to look first
+
+- **Routes** → [`main.py`](./main.py). Every endpoint is in one file by design — fast to scan.
+- **Method routing** (regular → LightGBM, intermittent → Croston, highly intermittent → conservative buffer) → [`src/services/adaptive_forecasting_service.py`](./src/services/adaptive_forecasting_service.py).
+- **Reorder math** → [`src/inventory/`](./src/inventory/).
+- **How the API response is assembled** (risk, decision block, explanation, model_info) → the `POST /api/analyze` handler in `main.py`.
+- **Persistence** → [`src/storage/analysis_store.py`](./src/storage/analysis_store.py).
+
+---
+
+## Design notes
+
+- **Honest fallbacks.** If the LightGBM artifact isn't loadable or the feature row can't be built, the API falls back to a 7-day moving average and labels `forecast_source` as `rule_based_estimate` — it never silently degrades.
+- **Deterministic synthetic data.** Unknown SKUs get a Poisson(20)×30 series seeded on the SKU string, labeled `demand_source: "synthetic"`. No hidden randomness between calls.
+- **No LLM in the response path.** Explanations are template-generated from the decision block — every sentence is traceable to a number the system already computed.
+- **Best-effort persistence.** A SQLite write failure never breaks the API response.
