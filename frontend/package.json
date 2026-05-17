@@ -4,7 +4,7 @@
   "private": true,
   "description": "Next.js dashboard for SupplySync AI — forecasts, risk, and reorder recommendations.",
   "engines": {
-    "node": ">=20"
+    "node": ">=22"
   },
   "scripts": {
     "dev": "next dev",

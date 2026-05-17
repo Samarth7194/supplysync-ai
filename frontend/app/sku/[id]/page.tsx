@@ -79,12 +79,29 @@ interface Analysis {
 interface HistoryPoint {
   date: string;
   demand: number;
+  units_sold?: number;
+}
+
+interface HistorySummary {
+  first_date: string;
+  last_date: string;
+  window_days_returned: number;
+  total_units_sold: number;
+  mean_units_per_day: number;
+  peak_units_in_one_day: number;
+  days_with_sales: number;
+  days_with_zero_sales: number;
 }
 
 interface HistoryResponse {
   sku: string;
   available: boolean;
   history: HistoryPoint[];
+  series_type?: string;
+  value_meaning?: string;
+  source?: string;
+  description?: string;
+  summary?: HistorySummary | null;
 }
 
 function RiskBadge({ risk }: { risk: string }) {
@@ -115,6 +132,7 @@ export default function SKUDetail() {
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [historyAvailable, setHistoryAvailable] = useState<boolean>(false);
+  const [historySummary, setHistorySummary] = useState<HistorySummary | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -178,6 +196,7 @@ export default function SKUDetail() {
         setAnalysis(analyzeRes);
         setHistory(historyRes.history ?? []);
         setHistoryAvailable(Boolean(historyRes.available) && (historyRes.history?.length ?? 0) > 0);
+        setHistorySummary(historyRes.summary ?? null);
       } catch (e) {
         console.error(e);
         setError("Could not connect to the backend. Make sure the API server is running.");
@@ -555,87 +574,180 @@ export default function SKUDetail() {
         )}
 
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
-          {/* Left: Chart (3 cols) */}
+          {/* Left: Recorded sales history (3 cols) — the core "actual past
+              data" surface. Deliberately titled and labeled so nothing here
+              can be mistaken for a forecast. Forecast values appear only as
+              dashed reference lines overlaid on top. */}
           <div className="lg:col-span-3 bg-gray-900 border border-gray-800 rounded-xl p-6">
             <SectionHeader
               compact
-              eyebrow="Demand"
+              eyebrow="Actuals"
               title={
                 <span className="inline-flex items-center gap-2">
-                  Historical demand
+                  Recorded sales history
                   {historyAvailable && (
                     <span className="text-xs font-normal text-gray-500">
                       · last {history.length} days
                     </span>
                   )}
-                  {analysis && (
-                    <DataSourceBadge kind={demandSourceKind(analysis.demand_source)} />
+                  {historyAvailable && (
+                    <DataSourceBadge kind="recorded" />
                   )}
                 </span>
               }
-              subtitle="Bars are recorded daily demand. Horizontal lines are the current forecast summary — move them with the Planning assumptions sliders above."
+              subtitle="Each blue bar is the real number of units sold on that day, pulled directly from the processed sales dataset — no forecasts, no imputation. Dashed lines are forecast reference levels, not past sales."
               right={
                 analysis && (
-                  <div className="flex items-center gap-3 text-[11px] text-gray-500">
+                  <div className="flex items-center gap-3 text-[11px] text-gray-500 flex-wrap">
                     <span className="inline-flex items-center gap-1.5">
-                      <span className="w-2 h-2 rounded-sm bg-blue-500" /> Recorded
+                      <span className="w-2 h-2 rounded-sm bg-blue-500" />
+                      <span className="text-gray-300">Actual units sold</span>
                     </span>
                     <span className="inline-flex items-center gap-1.5">
-                      <span className="w-3 h-px bg-green-500" /> P50
+                      <span className="w-3 border-t border-dashed border-green-500" /> P50 forecast
                     </span>
                     <span className="inline-flex items-center gap-1.5">
-                      <span className="w-3 h-px bg-red-500" /> P90
+                      <span className="w-3 border-t border-dashed border-red-500" /> P90 forecast
+                    </span>
+                    <span className="inline-flex items-center gap-1.5">
+                      <span className="w-3 h-px bg-yellow-500" /> Current stock
                     </span>
                   </div>
                 )
               }
             />
             {analysis && historyAvailable ? (
-              <ResponsiveContainer width="100%" height={280}>
-                <BarChart data={history} margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
-                  <XAxis
-                    dataKey="date"
-                    tick={{ fill: "#6b7280", fontSize: 11 }}
-                    tickLine={false}
-                    axisLine={false}
-                    tickFormatter={(value: string) => value.slice(5)}
-                    minTickGap={24}
-                  />
-                  <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} tickLine={false} axisLine={false} width={40} />
-                  <Tooltip
-                    contentStyle={{ background: "#111827", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
-                    labelStyle={{ color: "#9ca3af" }}
-                    formatter={(value) => [value as number, "Recorded demand"]}
-                    labelFormatter={(label) => `Date: ${label as string}`}
-                  />
-                  <Bar dataKey="demand" name="Recorded demand" fill="#3b82f6" radius={[4, 4, 0, 0]} />
-                  <ReferenceLine
-                    y={analysis.forecast.p50}
-                    stroke="#22c55e"
-                    strokeDasharray="6 3"
-                    label={{ value: `P50 forecast: ${analysis.forecast.p50}`, position: "right", fill: "#22c55e", fontSize: 11 }}
-                  />
-                  <ReferenceLine
-                    y={analysis.forecast.p90}
-                    stroke="#ef4444"
-                    strokeDasharray="6 3"
-                    label={{ value: `P90 forecast: ${analysis.forecast.p90}`, position: "right", fill: "#ef4444", fontSize: 11 }}
-                  />
-                  <ReferenceLine
-                    y={stock}
-                    stroke="#eab308"
-                    label={{ value: `Stock: ${stock}`, position: "right", fill: "#eab308", fontSize: 11 }}
-                  />
-                </BarChart>
-              </ResponsiveContainer>
+              <>
+                <ResponsiveContainer width="100%" height={280}>
+                  <BarChart data={history} margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
+                    <XAxis
+                      dataKey="date"
+                      tick={{ fill: "#6b7280", fontSize: 11 }}
+                      tickLine={false}
+                      axisLine={false}
+                      tickFormatter={(value: string) => value.slice(5)}
+                      minTickGap={24}
+                    />
+                    <YAxis tick={{ fill: "#6b7280", fontSize: 11 }} tickLine={false} axisLine={false} width={40} />
+                    <Tooltip
+                      contentStyle={{ background: "#111827", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
+                      labelStyle={{ color: "#9ca3af" }}
+                      formatter={(value) => [`${value as number} units`, "Actual units sold"]}
+                      labelFormatter={(label) => `Date: ${label as string}  (recorded sale)`}
+                    />
+                    <Bar dataKey="demand" name="Actual units sold" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                    <ReferenceLine
+                      y={analysis.forecast.p50}
+                      stroke="#22c55e"
+                      strokeDasharray="6 3"
+                      label={{ value: `P50 forecast: ${analysis.forecast.p50}`, position: "right", fill: "#22c55e", fontSize: 11 }}
+                    />
+                    <ReferenceLine
+                      y={analysis.forecast.p90}
+                      stroke="#ef4444"
+                      strokeDasharray="6 3"
+                      label={{ value: `P90 forecast: ${analysis.forecast.p90}`, position: "right", fill: "#ef4444", fontSize: 11 }}
+                    />
+                    <ReferenceLine
+                      y={stock}
+                      stroke="#eab308"
+                      label={{ value: `Stock: ${stock}`, position: "right", fill: "#eab308", fontSize: 11 }}
+                    />
+                  </BarChart>
+                </ResponsiveContainer>
+
+                {/* Summary strip — quick-read aggregates over the recorded window. */}
+                {historySummary && (
+                  <div className="mt-4 grid grid-cols-2 sm:grid-cols-4 gap-3 text-xs">
+                    <div className="bg-gray-950/60 border border-gray-800 rounded-lg px-3 py-2">
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider">Total sold</p>
+                      <p className="text-sm font-semibold text-white tabular-nums mt-0.5">
+                        {Math.round(historySummary.total_units_sold).toLocaleString()}
+                        <span className="text-[10px] text-gray-500 font-normal ml-1">units</span>
+                      </p>
+                    </div>
+                    <div className="bg-gray-950/60 border border-gray-800 rounded-lg px-3 py-2">
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider">Daily avg</p>
+                      <p className="text-sm font-semibold text-white tabular-nums mt-0.5">
+                        {historySummary.mean_units_per_day.toFixed(1)}
+                        <span className="text-[10px] text-gray-500 font-normal ml-1">/day</span>
+                      </p>
+                    </div>
+                    <div className="bg-gray-950/60 border border-gray-800 rounded-lg px-3 py-2">
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider">Peak day</p>
+                      <p className="text-sm font-semibold text-white tabular-nums mt-0.5">
+                        {Math.round(historySummary.peak_units_in_one_day).toLocaleString()}
+                        <span className="text-[10px] text-gray-500 font-normal ml-1">units</span>
+                      </p>
+                    </div>
+                    <div className="bg-gray-950/60 border border-gray-800 rounded-lg px-3 py-2">
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider">Zero-sale days</p>
+                      <p className="text-sm font-semibold text-white tabular-nums mt-0.5">
+                        {historySummary.days_with_zero_sales}
+                        <span className="text-[10px] text-gray-500 font-normal ml-1">
+                          /{historySummary.window_days_returned}
+                        </span>
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* Recent recorded sales — lets a reviewer verify dated actuals
+                    directly, not just inferred from bar height. */}
+                <div className="mt-5 border-t border-gray-800 pt-4">
+                  <div className="flex items-baseline justify-between mb-2">
+                    <p className="text-[11px] font-semibold text-gray-300 uppercase tracking-wider">
+                      Recent recorded sales
+                    </p>
+                    <span className="text-[10px] text-gray-500">
+                      exact daily values — most recent last
+                    </span>
+                  </div>
+                  <div className="overflow-x-auto">
+                    <table className="w-full text-xs">
+                      <thead>
+                        <tr className="text-left text-gray-500 border-b border-gray-800">
+                          <th className="py-1.5 pr-4 font-medium uppercase tracking-wider text-[10px]">Date</th>
+                          <th className="py-1.5 pr-4 font-medium uppercase tracking-wider text-[10px] text-right">Units sold</th>
+                          <th className="py-1.5 font-medium uppercase tracking-wider text-[10px]">Notes</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {history.slice(-7).reverse().map((row) => {
+                          const value = row.units_sold ?? row.demand;
+                          return (
+                            <tr key={row.date} className="border-b border-gray-800/50 last:border-b-0">
+                              <td className="py-1.5 pr-4 font-mono text-gray-300">{row.date}</td>
+                              <td className="py-1.5 pr-4 text-right tabular-nums text-white font-medium">
+                                {Math.round(value).toLocaleString()}
+                              </td>
+                              <td className="py-1.5 text-gray-500 text-[11px]">
+                                {value === 0 ? "no sales recorded" : "recorded actual"}
+                              </td>
+                            </tr>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+                  <p className="mt-3 text-[10px] text-gray-500 leading-relaxed">
+                    These are the exact values returned by
+                    {" "}<code className="px-1 py-0.5 rounded bg-gray-800 text-gray-300 text-[10px]">GET /api/skus/{skuId}/history</code>{" "}
+                    with <code className="px-1 py-0.5 rounded bg-gray-800 text-gray-300 text-[10px]">series_type=recorded_history</code>.
+                    Forecasted future values never appear in this list.
+                  </p>
+                </div>
+              </>
             ) : (
               <EmptyState
-                title="Historical demand unavailable"
+                title="No recorded sales history"
                 hint={
                   <>
-                    No recorded demand history was returned for this SKU. The recommendation
-                    on the right is still based on the backend&apos;s analysis; only this
-                    chart is hidden.
+                    The backend has no recorded sales for this SKU in the processed dataset, so
+                    there are no past actuals to show. The recommendation on the right still uses
+                    the backend&apos;s forecast logic (labeled honestly as <span className="text-amber-300">synthetic</span>
+                    {" "}or <span className="text-amber-300">rule-based fallback</span>) — only the
+                    actuals chart is hidden.
                   </>
                 }
                 className="h-[280px]"

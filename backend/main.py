@@ -753,15 +753,32 @@ async def skus_with_details():
     return {"skus": result}
 
 
+_HISTORY_METADATA = {
+    "series_type": "recorded_history",
+    "value_meaning": "actual_units_sold",
+    "source": "processed_dataset",
+    "description": (
+        "Each entry is the real number of units sold on that calendar day, "
+        "taken directly from the processed sales dataset. These are not "
+        "forecasts — forecast values live on POST /api/analyze."
+    ),
+}
+
+
 @app.get("/api/skus/{sku}/history", dependencies=[Depends(verify_api_key)])
 async def sku_history(sku: str, days: int = 30):
-    """Return the last ``days`` of recorded daily demand for a SKU.
+    """Return the last ``days`` of recorded actual sales for a SKU.
 
-    Values come directly from the processed daily-demand dataset — no
-    synthesis or imputation beyond the date-reindex that already runs inside
-    ``DataService.get_demand_history``. When the SKU has no recorded history
-    the response carries an empty ``history`` list and ``available=False`` so
-    the UI can render an honest empty state.
+    Each row is the real units-sold count for one calendar day from the
+    processed daily-demand dataset — no synthesis or imputation beyond the
+    date-reindex that already runs inside ``DataService.get_demand_history``.
+    The response envelope carries provenance metadata (``series_type``,
+    ``value_meaning``, ``source``) plus a lightweight ``summary`` so the UI
+    can label the values unambiguously as past actuals, not forecasts.
+
+    When the SKU has no recorded history the response carries an empty
+    ``history`` list and ``available=False`` so the UI can render an honest
+    empty state.
     """
     if _data_service is None:
         raise HTTPException(status_code=503, detail=_MISSING_DATA_MSG)
@@ -770,14 +787,46 @@ async def sku_history(sku: str, days: int = 30):
 
     series = _data_service.get_demand_history(sku)
     if len(series) == 0:
-        return {"sku": sku, "available": False, "history": []}
+        return {
+            "sku": sku,
+            "available": False,
+            "history": [],
+            "summary": None,
+            "window_days_requested": days,
+            **_HISTORY_METADATA,
+        }
 
     tail = series.tail(days)
+    # Each row retains the legacy ``demand`` key for backward compat, and
+    # exposes ``units_sold`` as the preferred, unambiguous name going forward.
     history = [
-        {"date": idx.strftime("%Y-%m-%d"), "demand": float(val)}
+        {
+            "date": idx.strftime("%Y-%m-%d"),
+            "demand": float(val),
+            "units_sold": float(val),
+        }
         for idx, val in tail.items()
     ]
-    return {"sku": sku, "available": True, "history": history}
+    values = [row["units_sold"] for row in history]
+    days_with_sales = sum(1 for v in values if v > 0)
+    summary = {
+        "first_date": history[0]["date"],
+        "last_date": history[-1]["date"],
+        "window_days_returned": len(history),
+        "total_units_sold": round(sum(values), 2),
+        "mean_units_per_day": round(sum(values) / len(values), 2) if values else 0.0,
+        "peak_units_in_one_day": round(max(values), 2) if values else 0.0,
+        "days_with_sales": days_with_sales,
+        "days_with_zero_sales": len(values) - days_with_sales,
+    }
+    return {
+        "sku": sku,
+        "available": True,
+        "history": history,
+        "summary": summary,
+        "window_days_requested": days,
+        **_HISTORY_METADATA,
+    }
 
 
 @app.post(

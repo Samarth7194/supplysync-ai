@@ -53,22 +53,58 @@ def test_history_endpoint_returns_real_recorded_demand(client):
     assert body["available"] is True
     assert len(body["history"]) == 5
 
-    # Must be the tail of the real recorded series (last 5 values), sorted by date.
-    expected = [
+    # Back-compat: every row still exposes ``date`` + ``demand``.
+    # New: every row also exposes the unambiguous ``units_sold`` alias.
+    expected_demand = [
         {"date": "2024-01-06", "demand": 12.0},
         {"date": "2024-01-07", "demand": 4.0},
         {"date": "2024-01-08", "demand": 6.0},
         {"date": "2024-01-09", "demand": 0.0},
         {"date": "2024-01-10", "demand": 9.0},
     ]
-    assert body["history"] == expected
+    for row, expected in zip(body["history"], expected_demand):
+        assert row["date"] == expected["date"]
+        assert row["demand"] == expected["demand"]
+        assert row["units_sold"] == expected["demand"]
+
+
+def test_history_endpoint_exposes_provenance_metadata(client):
+    res = client.get("/api/skus/HAS-HISTORY/history?days=5")
+    assert res.status_code == 200
+    body = res.json()
+
+    assert body["series_type"] == "recorded_history"
+    assert body["value_meaning"] == "actual_units_sold"
+    assert body["source"] == "processed_dataset"
+    assert "forecast" not in body["description"].split(".")[0].lower()
+
+
+def test_history_endpoint_summary_stats_match_series(client):
+    res = client.get("/api/skus/HAS-HISTORY/history?days=5")
+    body = res.json()
+    summary = body["summary"]
+    # Last 5 values from the stub series: 12, 4, 6, 0, 9
+    assert summary["first_date"] == "2024-01-06"
+    assert summary["last_date"] == "2024-01-10"
+    assert summary["window_days_returned"] == 5
+    assert summary["total_units_sold"] == 31.0
+    assert summary["mean_units_per_day"] == 6.2
+    assert summary["peak_units_in_one_day"] == 12.0
+    assert summary["days_with_sales"] == 4
+    assert summary["days_with_zero_sales"] == 1
 
 
 def test_history_endpoint_empty_when_sku_missing(client):
     res = client.get("/api/skus/UNKNOWN/history")
     assert res.status_code == 200
     body = res.json()
-    assert body == {"sku": "UNKNOWN", "available": False, "history": []}
+    # Back-compat shape preserved: sku, available, history (empty).
+    assert body["sku"] == "UNKNOWN"
+    assert body["available"] is False
+    assert body["history"] == []
+    # Provenance metadata is always present, even for the empty case.
+    assert body["series_type"] == "recorded_history"
+    assert body["summary"] is None
 
 
 def test_history_endpoint_clamps_days(client):

@@ -157,13 +157,36 @@ export interface AuthStatus {
 
 export interface DemandHistoryPoint {
   date: string;
+  /** Legacy alias for ``units_sold`` — kept for backward compatibility. */
   demand: number;
+  /** Real units sold on this calendar day. Not a forecast. */
+  units_sold?: number;
+}
+
+export interface SkuHistorySummary {
+  first_date: string;
+  last_date: string;
+  window_days_returned: number;
+  total_units_sold: number;
+  mean_units_per_day: number;
+  peak_units_in_one_day: number;
+  days_with_sales: number;
+  days_with_zero_sales: number;
 }
 
 export interface SkuHistory {
   sku: string;
   available: boolean;
   history: DemandHistoryPoint[];
+  /** Provenance: "recorded_history" when the values come from the dataset. */
+  series_type?: "recorded_history";
+  /** Human-readable: what the numeric values actually mean. */
+  value_meaning?: "actual_units_sold";
+  /** Where the numbers came from — "processed_dataset" for real sales. */
+  source?: "processed_dataset";
+  description?: string;
+  summary?: SkuHistorySummary | null;
+  window_days_requested?: number;
 }
 
 class ApiClient {

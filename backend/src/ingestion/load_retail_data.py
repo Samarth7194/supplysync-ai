@@ -22,16 +22,21 @@ PathLike = Union[str, Path]
 
 
 def _project_root() -> Path:
-    """Find the project root (directory containing 'data/')."""
+    """Find the project root — the directory containing ``data/raw/`` or
+    ``data/processed/``.
+
+    ``data/raw/`` holds the source CSV (may be absent after a clean clone —
+    users download it separately). ``data/processed/`` holds the generated
+    parquet. Either one is sufficient evidence that we've found the root.
+    """
     current = Path(__file__).resolve()
     for parent in current.parents:
-        if (parent / "data" / "raw").exists():
+        if (parent / "data" / "raw").exists() or (parent / "data" / "processed").exists():
             return parent
     cwd = Path.cwd()
-    if (cwd / "data" / "raw").exists():
-        return cwd
-    if (cwd.parent / "data" / "raw").exists():
-        return cwd.parent
+    for candidate in (cwd, cwd.parent):
+        if (candidate / "data" / "raw").exists() or (candidate / "data" / "processed").exists():
+            return candidate
     return cwd
 
 
