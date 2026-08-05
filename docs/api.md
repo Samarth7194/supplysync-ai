@@ -25,6 +25,9 @@ All examples below omit auth; add the cookie or `X-API-Key` header when `AUTH_MO
 | GET  | `/api/kpis`                    | Simulated cost/fill-rate KPIs with an `interpretation` block |
 | GET  | `/api/skus`                    | Top-20 SKU codes |
 | GET  | `/api/skus/details`            | Top-20 SKUs with `avg_demand` / `total_demand` |
+| GET  | `/api/stock`                   | Latest server-side stock snapshots for SKUs with recorded stock |
+| GET  | `/api/stock/{sku_id}`          | Latest server-side stock snapshot for one SKU |
+| PUT  | `/api/stock/{sku_id}`          | Append a server-side stock snapshot for one SKU |
 | GET  | `/api/skus/{sku}/history?days=30` | Recorded daily demand for a SKU |
 | POST | `/api/analyze`                 | Risk + reorder recommendation for a single SKU |
 | GET  | `/api/analyses/recent?limit=N`    | Most-recent persisted analyses (SQLite, local/demo store) |
@@ -175,6 +178,45 @@ For unknown SKUs, `available` is `false` and `history` is an empty array — nev
 ```
 
 `days` is clamped to `[1, 365]`.
+
+---
+
+## Server-side stock
+
+`GET /api/stock` returns the latest server-side stock snapshot for every SKU
+with recorded stock. `GET /api/stock/{sku_id}` returns one SKU, and
+`PUT /api/stock/{sku_id}` appends a new stock snapshot.
+
+Stock writes are append-only so historical recommendations remain auditable.
+`/api/analyze` still accepts `current_stock` in the request body for backward
+compatibility; the frontend now prefers the stock API and falls back to browser
+storage only if the stock endpoint is unavailable or no server-side value exists.
+
+Example write:
+
+```json
+{
+  "quantity_on_hand": 80,
+  "quantity_reserved": 5,
+  "note": "manual count after receiving shipment"
+}
+```
+
+Example response:
+
+```json
+{
+  "sku": "85099B",
+  "quantity_on_hand": 80.0,
+  "quantity_reserved": 5.0,
+  "quantity_available": 75.0,
+  "source": "user",
+  "recorded_at": "2026-08-05T08:15:00+00:00"
+}
+```
+
+If the SQLAlchemy database has not been migrated yet, stock endpoints return
+503 with an actionable migration message.
 
 ---
 

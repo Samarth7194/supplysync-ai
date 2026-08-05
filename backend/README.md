@@ -108,7 +108,13 @@ Test files are organized by responsibility — `test_inventory_logic.py` for the
 
 ## Environment variables
 
-All documented in **[`.env.example`](./.env.example)**. Copy to `.env` or export in your shell. Key ones:
+All documented in **[`.env.example`](./.env.example)** and composed through
+`src/config/settings.py`, the single runtime settings entry point for the
+FastAPI app. Individual domains live under `src/config/` (`app.py`, `auth.py`,
+`database.py`, `forecasting.py`, `inventory.py`, `logging.py`) so new settings
+do not turn into one giant module. Invalid numeric settings fail fast during
+startup instead of silently falling back. Copy to `.env` or export in your
+shell. Key ones:
 
 - `MODEL_PATH` — where ModelService loads/saves the LightGBM artifact.
 - `AUTH_MODE` — `off` (default) or `demo` (adds an HMAC session cookie gate).
@@ -125,6 +131,29 @@ All documented in **[`.env.example`](./.env.example)**. Copy to `.env` or export
 - **Reorder math** → [`src/inventory/`](./src/inventory/).
 - **How the API response is assembled** (risk, decision block, explanation, model_info) → the `POST /api/analyze` handler in `main.py`.
 - **Persistence** → [`src/storage/analysis_store.py`](./src/storage/analysis_store.py).
+
+---
+
+## Database migration foundation
+
+The production database layer has been scaffolded but is not route-wired yet.
+The active runtime persistence path is still `src/storage/analysis_store.py`.
+
+- `DATABASE_URL` is the SQLAlchemy URL for the target PostgreSQL-backed persistence layer.
+- `src/db/session.py` builds SQLAlchemy engines and sessions from `DATABASE_URL`.
+- `src/db/models.py` maps the target schema from `docs/database-design.md`.
+- `src/repositories/analysis_repository.py` owns analysis-run and prediction-log writes.
+- `src/repositories/stock_repository.py` owns server-side stock snapshots.
+- `alembic/` is configured to autogenerate migrations from `db.models.Base.metadata`.
+
+Run migrations from `backend/`:
+
+```bash
+python -m alembic upgrade head
+```
+
+Route handlers should continue to avoid direct SQLAlchemy calls. Future steps
+should inject repositories into services, then migrate endpoints incrementally.
 
 ---
 

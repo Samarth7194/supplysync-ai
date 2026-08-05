@@ -114,6 +114,20 @@ export interface RecentAnalysesResponse {
   source?: string;
 }
 
+export interface StockLevel {
+  sku: string;
+  quantity_on_hand: number;
+  quantity_reserved: number;
+  quantity_available: number;
+  source: string;
+  recorded_at?: string | null;
+}
+
+export interface StockListResponse {
+  items: StockLevel[];
+  source: "database";
+}
+
 export interface KpiInterpretation {
   baseline: string;
   baseline_description: string;
@@ -249,6 +263,29 @@ class ApiClient {
 
   async getRecentAnalyses(limit: number = 10): Promise<RecentAnalysesResponse> {
     return this.request(`/api/analyses/recent?limit=${limit}`);
+  }
+
+  async getStockLevels(): Promise<StockListResponse> {
+    return this.request("/api/stock");
+  }
+
+  async getStockForSku(sku: string): Promise<StockLevel> {
+    return this.request(`/api/stock/${encodeURIComponent(sku)}`);
+  }
+
+  async updateStockForSku(
+    sku: string,
+    quantityOnHand: number,
+    quantityReserved: number = 0,
+  ): Promise<StockLevel> {
+    return this.request(`/api/stock/${encodeURIComponent(sku)}`, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        quantity_on_hand: quantityOnHand,
+        quantity_reserved: quantityReserved,
+      }),
+    });
   }
 
   async getAuthStatus(): Promise<AuthStatus> {

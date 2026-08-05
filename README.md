@@ -460,7 +460,13 @@ The compose file bind-mounts `./backend` at `/app` and the dataset at `/data` (r
 | `SESSION_SECRET` | *(ephemeral)* | HMAC key for signing session cookies |
 | `API_KEY` | *(unset)* | Legacy header auth — honored in either mode when set |
 | `ALLOWED_ORIGINS` | `http://localhost:3000` | Comma-separated CORS origins |
+| `LOG_LEVEL` / `LOG_JSON` | `INFO` / `false` | Logging configuration parsed by the backend settings layer |
 | `ANALYSES_DB_PATH` | `backend/data/analyses.sqlite` | Local/demo persistence file |
+
+Backend runtime settings are composed in `backend/src/config/settings.py`, with
+domain-specific modules for app, auth, database, forecasting, inventory, and
+logging settings. Invalid numeric settings fail fast during startup instead of
+silently falling back.
 
 **Frontend** (`frontend/.env.example`):
 

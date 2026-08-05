@@ -1,0 +1,230 @@
+"""SQLAlchemy models for the target persistence schema.
+
+These mappings mirror docs/database-design.md. They are intentionally not wired
+into the current FastAPI routes yet; repositories will become the integration
+point for future migration steps.
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import date, datetime
+from decimal import Decimal
+from typing import Any
+
+from sqlalchemy import (
+    Boolean,
+    CheckConstraint,
+    Date,
+    DateTime,
+    ForeignKey,
+    Integer,
+    JSON,
+    Numeric,
+    String,
+    Text,
+    UniqueConstraint,
+    func,
+)
+from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.types import Uuid
+
+
+class Base(DeclarativeBase):
+    pass
+
+
+class Sku(Base):
+    __tablename__ = "skus"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sku_code: Mapped[str] = mapped_column(String(64), nullable=False, unique=True)
+    name: Mapped[str | None] = mapped_column(Text)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    stock_levels: Mapped[list["StockLevel"]] = relationship(back_populates="sku", cascade="all, delete-orphan")
+    inventory_policies: Mapped[list["InventoryPolicy"]] = relationship(back_populates="sku", cascade="all, delete-orphan")
+    analysis_runs: Mapped[list["AnalysisRun"]] = relationship(back_populates="sku")
+    prediction_logs: Mapped[list["PredictionLog"]] = relationship(back_populates="sku")
+    forecast_evaluations: Mapped[list["ForecastEvaluation"]] = relationship(back_populates="sku")
+
+
+class StockLevel(Base):
+    __tablename__ = "stock_levels"
+    __table_args__ = (
+        CheckConstraint("quantity_on_hand >= 0", name="ck_stock_levels_on_hand_non_negative"),
+        CheckConstraint("quantity_reserved >= 0", name="ck_stock_levels_reserved_non_negative"),
+        CheckConstraint("quantity_available >= 0", name="ck_stock_levels_available_non_negative"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sku_id: Mapped[int] = mapped_column(ForeignKey("skus.id"), nullable=False, index=True)
+    quantity_on_hand: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    quantity_reserved: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False, default=0, server_default="0")
+    quantity_available: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    source: Mapped[str] = mapped_column(String(32), nullable=False)
+    note: Mapped[str | None] = mapped_column(Text)
+    recorded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    sku: Mapped[Sku] = relationship(back_populates="stock_levels")
+
+
+class InventoryPolicy(Base):
+    __tablename__ = "inventory_policies"
+    __table_args__ = (
+        CheckConstraint("lead_time_days between 1 and 365", name="ck_inventory_policies_lead_time_range"),
+        CheckConstraint("service_level > 0 and service_level < 1", name="ck_inventory_policies_service_level_range"),
+        CheckConstraint("moq >= 0", name="ck_inventory_policies_moq_non_negative"),
+        CheckConstraint("order_multiple >= 1", name="ck_inventory_policies_order_multiple_positive"),
+        CheckConstraint("max_order_quantity is null or max_order_quantity > 0", name="ck_inventory_policies_max_order_positive"),
+        CheckConstraint("holding_cost_per_unit is null or holding_cost_per_unit >= 0", name="ck_inventory_policies_holding_cost_non_negative"),
+        CheckConstraint("stockout_cost_per_unit is null or stockout_cost_per_unit >= 0", name="ck_inventory_policies_stockout_cost_non_negative"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    sku_id: Mapped[int] = mapped_column(ForeignKey("skus.id"), nullable=False, index=True)
+    lead_time_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    service_level: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
+    moq: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    order_multiple: Mapped[int] = mapped_column(Integer, nullable=False, default=1, server_default="1")
+    max_order_quantity: Mapped[int | None] = mapped_column(Integer)
+    holding_cost_per_unit: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    stockout_cost_per_unit: Mapped[Decimal | None] = mapped_column(Numeric(12, 4))
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true", index=True)
+    effective_from: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    sku: Mapped[Sku] = relationship(back_populates="inventory_policies")
+
+
+class AnalysisRun(Base):
+    __tablename__ = "analysis_runs"
+    __table_args__ = (
+        UniqueConstraint("request_id", name="uq_analysis_runs_request_id"),
+        CheckConstraint("current_stock >= 0", name="ck_analysis_runs_current_stock_non_negative"),
+        CheckConstraint("recommended_order_quantity >= 0", name="ck_analysis_runs_recommended_order_non_negative"),
+        CheckConstraint("service_level > 0 and service_level < 1", name="ck_analysis_runs_service_level_range"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    request_id: Mapped[uuid.UUID] = mapped_column(Uuid(as_uuid=True), nullable=False, default=uuid.uuid4)
+    sku_id: Mapped[int | None] = mapped_column(ForeignKey("skus.id"), index=True)
+    sku_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    current_stock: Mapped[Decimal] = mapped_column(Numeric(14, 3), nullable=False)
+    recommended_order_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    action: Mapped[str] = mapped_column(String(32), nullable=False)
+    risk: Mapped[str] = mapped_column(String(16), nullable=False, index=True)
+    risk_color: Mapped[str | None] = mapped_column(String(16))
+    demand_pattern: Mapped[str] = mapped_column(String(32), nullable=False)
+    demand_source: Mapped[str] = mapped_column(String(32), nullable=False)
+    forecast_source: Mapped[str] = mapped_column(String(32), nullable=False)
+    forecast_method: Mapped[str] = mapped_column(String(64), nullable=False)
+    routing_reason: Mapped[str | None] = mapped_column(Text)
+    lead_time_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    service_level: Mapped[Decimal] = mapped_column(Numeric(5, 4), nullable=False)
+    lead_time_demand: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
+    safety_stock: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
+    safety_stock_method: Mapped[str | None] = mapped_column(String(32))
+    reorder_point: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
+    inventory_gap: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
+    p50: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
+    p90: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
+    forecast_daily: Mapped[list[float] | None] = mapped_column(JSON)
+    explanation: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+
+    sku: Mapped[Sku | None] = relationship(back_populates="analysis_runs")
+    prediction_logs: Mapped[list["PredictionLog"]] = relationship(back_populates="analysis_run")
+
+
+class PredictionLog(Base):
+    __tablename__ = "prediction_logs"
+    __table_args__ = (
+        CheckConstraint("input_history_length >= 0", name="ck_prediction_logs_history_length_non_negative"),
+        CheckConstraint("forecast_horizon_days > 0", name="ck_prediction_logs_horizon_positive"),
+        CheckConstraint("recommended_order_quantity >= 0", name="ck_prediction_logs_recommended_order_non_negative"),
+        CheckConstraint("actual_observed_demand is null or actual_observed_demand >= 0", name="ck_prediction_logs_actual_non_negative"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    analysis_run_id: Mapped[int | None] = mapped_column(ForeignKey("analysis_runs.id"), index=True)
+    sku_id: Mapped[int | None] = mapped_column(ForeignKey("skus.id"), index=True)
+    sku_code: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    predicted_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    target_start_date: Mapped[date | None] = mapped_column(Date)
+    target_end_date: Mapped[date | None] = mapped_column(Date)
+    demand_source: Mapped[str] = mapped_column(String(32), nullable=False)
+    forecast_method: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    forecast_source: Mapped[str] = mapped_column(String(32), nullable=False)
+    routing_reason: Mapped[str | None] = mapped_column(Text)
+    model_name: Mapped[str | None] = mapped_column(String(128))
+    model_version: Mapped[str | None] = mapped_column(String(128))
+    model_artifact_id: Mapped[int | None] = mapped_column(ForeignKey("model_artifacts.id"), index=True)
+    input_history_length: Mapped[int] = mapped_column(Integer, nullable=False)
+    forecast_horizon_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    p50: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
+    p90: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
+    forecast_daily: Mapped[list[float] | None] = mapped_column(JSON)
+    recommended_order_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
+    actual_observed_demand: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
+    actual_observed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    analysis_run: Mapped[AnalysisRun | None] = relationship(back_populates="prediction_logs")
+    sku: Mapped[Sku | None] = relationship(back_populates="prediction_logs")
+    model_artifact: Mapped["ModelArtifact | None"] = relationship(back_populates="prediction_logs")
+
+
+class ForecastEvaluation(Base):
+    __tablename__ = "forecast_evaluations"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    model_artifact_id: Mapped[int | None] = mapped_column(ForeignKey("model_artifacts.id"), index=True)
+    sku_id: Mapped[int | None] = mapped_column(ForeignKey("skus.id"), index=True)
+    sku_code: Mapped[str | None] = mapped_column(String(64))
+    demand_class: Mapped[str | None] = mapped_column(String(32), index=True)
+    model_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    evaluation_scope: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    metric_mae: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    metric_rmse: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    metric_bias: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    metric_wape: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    metric_mase: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    n_skus: Mapped[int | None] = mapped_column(Integer)
+    n_test_points: Mapped[int | None] = mapped_column(Integer)
+    horizon_days: Mapped[int | None] = mapped_column(Integer)
+    source_path: Mapped[str | None] = mapped_column(Text)
+    generated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    model_artifact: Mapped["ModelArtifact | None"] = relationship(back_populates="forecast_evaluations")
+    sku: Mapped[Sku | None] = relationship(back_populates="forecast_evaluations")
+
+
+class ModelArtifact(Base):
+    __tablename__ = "model_artifacts"
+    __table_args__ = (
+        UniqueConstraint("model_name", "version", name="uq_model_artifacts_name_version"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    model_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    model_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
+    version: Mapped[str] = mapped_column(String(128), nullable=False)
+    artifact_uri: Mapped[str | None] = mapped_column(Text)
+    metadata_uri: Mapped[str | None] = mapped_column(Text)
+    feature_schema: Mapped[list[str] | None] = mapped_column(JSON)
+    training_dataset: Mapped[str | None] = mapped_column(Text)
+    training_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    training_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    training_metrics: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false", index=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    forecast_evaluations: Mapped[list[ForecastEvaluation]] = relationship(back_populates="model_artifact")
+    prediction_logs: Mapped[list[PredictionLog]] = relationship(back_populates="model_artifact")
+

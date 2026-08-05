@@ -104,6 +104,15 @@ interface HistoryResponse {
   summary?: HistorySummary | null;
 }
 
+interface StockResponse {
+  sku: string;
+  quantity_on_hand: number;
+  quantity_reserved: number;
+  quantity_available: number;
+  source: string;
+  recorded_at?: string | null;
+}
+
 function RiskBadge({ risk }: { risk: string }) {
   const styles: Record<string, string> = {
     HIGH: "bg-red-500/15 text-red-400 border-red-500/30",
@@ -165,6 +174,25 @@ export default function SKUDetail() {
     return r.json();
   }
 
+  async function fetchServerStock(): Promise<StockResponse | null> {
+    return fetch(`${API}/api/stock/${encodeURIComponent(skuId)}`, {
+      credentials: "include",
+    })
+      .then<StockResponse | null>((r) => (r.ok ? r.json() : null))
+      .catch<StockResponse | null>(() => null);
+  }
+
+  async function saveServerStock(stock: number): Promise<StockResponse | null> {
+    return fetch(`${API}/api/stock/${encodeURIComponent(skuId)}`, {
+      method: "PUT",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ quantity_on_hand: stock }),
+    })
+      .then<StockResponse | null>((r) => (r.ok ? r.json() : null))
+      .catch<StockResponse | null>(() => null);
+  }
+
   useEffect(() => {
     async function load() {
       try {
@@ -176,8 +204,9 @@ export default function SKUDetail() {
         setSkuIndex(idx >= 0 ? idx : 0);
 
         const demoStock = info ? computeDemoStock(info.avg_demand, idx) : 50;
-        const stock = getStockForSku(skuId, demoStock);
-        const origin = getStockOrigin(skuId);
+        const serverStock = await fetchServerStock();
+        const stock = serverStock?.quantity_on_hand ?? getStockForSku(skuId, demoStock);
+        const origin = serverStock ? "server" : getStockOrigin(skuId);
         setCurrentStock(stock);
         setStockOrigin(origin);
         setStockDraft(String(stock));
@@ -226,16 +255,21 @@ export default function SKUDetail() {
     }
   }
 
-  function commitStockDraft() {
+  async function commitStockDraft() {
     const parsed = Number(stockDraft);
     if (!Number.isFinite(parsed) || parsed < 0) {
       setStockDraft(String(currentStock));
       return;
     }
     const next = Math.round(parsed);
-    if (next === currentStock && stockOrigin === "user") return;
-    setStockForSku(skuId, next);
-    setStockOrigin("user");
+    if (next === currentStock && stockOrigin !== "demo") return;
+    const serverStock = await saveServerStock(next);
+    if (serverStock) {
+      setStockOrigin("server");
+    } else {
+      setStockForSku(skuId, next);
+      setStockOrigin("user");
+    }
     void applyAssumptions(next, leadTimeDays, serviceLevelPct);
   }
 
@@ -477,17 +511,23 @@ export default function SKUDetail() {
                   </span>
                   <span
                     className={`text-[10px] uppercase tracking-wider px-1.5 py-0.5 rounded border ${
-                      stockOrigin === "user"
+                      stockOrigin !== "demo"
                         ? "text-emerald-300 bg-emerald-500/10 border-emerald-500/30"
                         : "text-gray-400 bg-gray-500/10 border-gray-500/30"
                     }`}
                     title={
                       stockOrigin === "user"
                         ? "You've set this value — stored locally in your browser."
-                        : "Demo value derived from this SKU's average demand."
+                        : stockOrigin === "server"
+                          ? "Stored by the backend stock API."
+                          : "Demo value derived from this SKU's average demand."
                     }
                   >
-                    {stockOrigin === "user" ? "Stored locally" : "Demo value"}
+                    {stockOrigin === "server"
+                      ? "Server stored"
+                      : stockOrigin === "user"
+                        ? "Stored locally"
+                        : "Demo value"}
                   </span>
                 </div>
                 <input
@@ -790,7 +830,15 @@ export default function SKUDetail() {
                       <p className="text-[11px] text-gray-500 uppercase tracking-wider">
                         Current stock
                       </p>
-                      <DataSourceBadge kind={stockOrigin === "user" ? "user_stored" : "demo_value"} />
+                      <DataSourceBadge
+                        kind={
+                          stockOrigin === "server"
+                            ? "server_stored"
+                            : stockOrigin === "user"
+                              ? "user_stored"
+                              : "demo_value"
+                        }
+                      />
                     </div>
                     <p className="text-2xl font-bold tabular-nums mt-1">{stock}</p>
                   </div>

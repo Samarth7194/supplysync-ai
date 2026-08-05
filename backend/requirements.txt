@@ -11,6 +11,11 @@ uvicorn[standard]>=0.24.0
 pydantic>=2.11.7
 python-multipart>=0.0.6
 
+# Database
+SQLAlchemy>=2.0.36
+alembic>=1.14.0
+psycopg2-binary>=2.9.10
+
 # Configuration
 python-dotenv>=1.1.0
 

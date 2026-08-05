@@ -9,7 +9,7 @@
 const STOCK_KEY = (sku: string) => `supplysync.stock.v1.${sku}`;
 const ORIGIN_KEY = (sku: string) => `supplysync.stock-origin.v1.${sku}`;
 
-export type StockOrigin = "user" | "demo";
+export type StockOrigin = "server" | "user" | "demo";
 
 export function getStockForSku(sku: string, fallback: number): number {
   if (typeof window === "undefined") return fallback;

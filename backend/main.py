@@ -12,7 +12,7 @@ from typing import List, Optional
 
 import numpy as np
 import pandas as pd
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Request, Response, Security
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Response, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
@@ -25,11 +25,17 @@ from services.intelligent_inventory_service import IntelligentInventoryService
 from services.model_service import get_model_service
 from ingestion.load_retail_data import get_sku_descriptions
 from storage.analysis_store import AnalysisStore, serialize_rows
+from config.settings import load_settings
+from dependencies.stock import get_stock_service
+from services.stock_service import (
+    InvalidStockLevelError,
+    StockPersistenceUnavailableError,
+    StockService,
+)
 from auth.session import (
     AuthConfig,
     COOKIE_NAME,
     check_credentials,
-    load_config as load_auth_config,
     sign_session,
     verify_session,
 )
@@ -44,6 +50,11 @@ _sku_descriptions: dict = {}
 _inventory_service: Optional[IntelligentInventoryService] = None
 _analysis_store: Optional[AnalysisStore] = None
 
+# --- Runtime configuration --------------------------------------------------
+
+SETTINGS = load_settings()
+
+
 # --- Access control ---------------------------------------------------------
 #
 # Two-tier, intentionally minimal:
@@ -54,7 +65,7 @@ _analysis_store: Optional[AnalysisStore] = None
 # ``require_access`` is the single dependency gate every ``/api/*`` route
 # uses. ``/health`` and ``/api/auth/*`` deliberately stay public.
 
-AUTH_CONFIG: AuthConfig = load_auth_config()
+AUTH_CONFIG: AuthConfig = SETTINGS.auth
 api_key_header = APIKeyHeader(name="X-API-Key", auto_error=False)
 
 
@@ -94,9 +105,7 @@ verify_api_key = require_access
 async def lifespan(app: FastAPI):
     global _loaded_model, _data_service, _sku_descriptions, _inventory_service, _analysis_store
 
-    default_models_dir = os.path.join(os.path.dirname(__file__), "saved_models")
-    saved_models_dir = os.getenv("MODEL_PATH", default_models_dir)
-    model_service = get_model_service(model_dir=saved_models_dir)
+    model_service = get_model_service(model_dir=SETTINGS.forecasting.model_path)
     model_feature_columns: Optional[List[str]] = None
     try:
         _loaded_model = model_service.load_model("lightgbm_demand_forecast")
@@ -129,12 +138,8 @@ async def lifespan(app: FastAPI):
 
     # Local/demo persistence. Gitignored; override path with ANALYSES_DB_PATH.
     try:
-        db_path = os.getenv(
-            "ANALYSES_DB_PATH",
-            os.path.join(os.path.dirname(__file__), "data", "analyses.sqlite"),
-        )
-        _analysis_store = AnalysisStore(db_path)
-        logger.info("Analysis store ready at %s", db_path)
+        _analysis_store = AnalysisStore(SETTINGS.database.analyses_db_path)
+        logger.info("Analysis store ready at %s", SETTINGS.database.analyses_db_path)
     except Exception as e:  # noqa: BLE001
         logger.warning("Analysis store unavailable: %s", e)
         _analysis_store = None
@@ -144,16 +149,12 @@ async def lifespan(app: FastAPI):
 
 # --- App Setup ---
 
-ALLOWED_ORIGINS = [
-    o.strip() for o in os.getenv("ALLOWED_ORIGINS", "http://localhost:3000").split(",") if o.strip()
-]
-
 app = FastAPI(title="SupplySync AI", lifespan=lifespan)
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
-    allow_methods=["GET", "POST"],
+    allow_origins=SETTINGS.app.allowed_origins,
+    allow_methods=["GET", "POST", "PUT"],
     allow_headers=["Content-Type", "X-API-Key"],
     # Needed so the demo-mode session cookie crosses origins during dev
     # (frontend on :3000, backend on :8000). In production with a single
@@ -169,9 +170,30 @@ class AnalyzeRequest(BaseModel):
     current_stock: float = Field(50, ge=0)
     demand_history: Optional[List[float]] = None
     # Configurable business assumptions. Both are optional and fall back to
-    # the service defaults (7 days, 95% service level) for backward compat.
+    # typed runtime settings for backward compat.
     lead_time_days: Optional[int] = Field(None, ge=1, le=90)
     service_level: Optional[float] = Field(None, gt=0.5, lt=1.0)
+
+
+class StockUpdateRequest(BaseModel):
+    quantity_on_hand: float = Field(..., ge=0)
+    quantity_reserved: float = Field(0, ge=0)
+    note: Optional[str] = Field(None, max_length=500)
+    sku_name: Optional[str] = Field(None, max_length=500)
+
+
+class StockResponse(BaseModel):
+    sku: str
+    quantity_on_hand: float
+    quantity_reserved: float
+    quantity_available: float
+    source: str
+    recorded_at: Optional[str] = None
+
+
+class StockListResponse(BaseModel):
+    items: List[StockResponse]
+    source: str = "database"
 
 
 class ForecastBlock(BaseModel):
@@ -753,6 +775,66 @@ async def skus_with_details():
     return {"skus": result}
 
 
+def _stock_error(detail: str, status_code: int = 503) -> HTTPException:
+    return HTTPException(status_code=status_code, detail=detail)
+
+
+@app.get(
+    "/api/stock",
+    dependencies=[Depends(verify_api_key)],
+    response_model=StockListResponse,
+)
+async def list_stock(stock_service: StockService = Depends(get_stock_service)):
+    """Return latest server-side stock snapshots for all SKUs with stock."""
+    try:
+        snapshots = stock_service.list_latest_stock()
+    except StockPersistenceUnavailableError as exc:
+        raise _stock_error(str(exc)) from exc
+    return {"items": [snapshot.__dict__ for snapshot in snapshots], "source": "database"}
+
+
+@app.get(
+    "/api/stock/{sku_id}",
+    dependencies=[Depends(verify_api_key)],
+    response_model=StockResponse,
+)
+async def get_stock(sku_id: str, stock_service: StockService = Depends(get_stock_service)):
+    """Return the latest server-side stock snapshot for one SKU."""
+    try:
+        snapshot = stock_service.get_latest_stock(sku_id)
+    except StockPersistenceUnavailableError as exc:
+        raise _stock_error(str(exc)) from exc
+    if snapshot is None:
+        raise _stock_error(f"No server-side stock recorded for SKU {sku_id}.", status_code=404)
+    return snapshot.__dict__
+
+
+@app.put(
+    "/api/stock/{sku_id}",
+    dependencies=[Depends(verify_api_key)],
+    response_model=StockResponse,
+)
+async def update_stock(
+    sku_id: str,
+    body: StockUpdateRequest,
+    stock_service: StockService = Depends(get_stock_service),
+):
+    """Append a server-side stock snapshot for one SKU."""
+    try:
+        snapshot = stock_service.record_stock(
+            sku_code=sku_id,
+            quantity_on_hand=body.quantity_on_hand,
+            quantity_reserved=body.quantity_reserved,
+            note=body.note,
+            sku_name=body.sku_name,
+        )
+    except InvalidStockLevelError as exc:
+        raise _stock_error(str(exc), status_code=422) from exc
+    except StockPersistenceUnavailableError as exc:
+        raise _stock_error(str(exc)) from exc
+    return snapshot.__dict__
+
+
 _HISTORY_METADATA = {
     "series_type": "recorded_history",
     "value_meaning": "actual_units_sold",
@@ -858,8 +940,16 @@ async def analyze_sku(body: AnalyzeRequest):
         demand_series = pd.Series(rng.poisson(20, 30).astype(float))
         demand_source = "synthetic"
 
-    effective_lead_time = int(body.lead_time_days) if body.lead_time_days else 7
-    effective_service_level = float(body.service_level) if body.service_level else 0.95
+    effective_lead_time = (
+        int(body.lead_time_days)
+        if body.lead_time_days
+        else SETTINGS.inventory.default_lead_time_days
+    )
+    effective_service_level = (
+        float(body.service_level)
+        if body.service_level
+        else SETTINGS.inventory.default_service_level
+    )
     try:
         decision = _inventory_service.get_intelligent_reorder_decision(
             sku=body.sku,

@@ -9,6 +9,7 @@ export type ProvenanceKind =
   | "recorded"
   | "user_provided"
   | "user_stored"
+  | "server_stored"
   | "synthetic"
   | "model_forecast"
   | "statistical_method"
@@ -30,6 +31,11 @@ const COPY: Record<ProvenanceKind, { label: string; tooltip: string; className: 
   user_stored: {
     label: "Stored locally",
     tooltip: "You've set this value. It's stored in your browser's localStorage, not on any server.",
+    className: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30",
+  },
+  server_stored: {
+    label: "Server stored",
+    tooltip: "This value is stored by the backend stock API.",
     className: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30",
   },
   synthetic: {

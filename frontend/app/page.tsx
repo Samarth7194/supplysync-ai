@@ -23,6 +23,7 @@ import {
   type KpiData,
   type HealthStatus,
   type RecentAnalysis,
+  type StockLevel,
 } from "@/lib/api";
 import {
   DataSourceBadge,
@@ -157,6 +158,7 @@ export default function Dashboard() {
   const [kpisUnavailable, setKpisUnavailable] = useState(false);
   const [skusUnavailable, setSkusUnavailable] = useState(false);
   const [recentAnalyses, setRecentAnalyses] = useState<RecentAnalysis[]>([]);
+  const [serverStock, setServerStock] = useState<Record<string, StockLevel>>({});
   const [activeFilter, setActiveFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -171,10 +173,11 @@ export default function Dashboard() {
 
     async function fetchData() {
       try {
-        const [healthRes, kpiRes, skuRes] = await Promise.all([
+        const [healthRes, kpiRes, skuRes, stockRes] = await Promise.all([
           api.getHealth().catch(() => null),
           api.getKpis().catch(() => null),
           api.getSkuDetails().catch(() => null),
+          api.getStockLevels().catch(() => null),
         ]);
 
         if (cancelled) return;
@@ -192,6 +195,10 @@ export default function Dashboard() {
           setSkuDetails([]);
           setSkusUnavailable(true);
         }
+        const stockBySku = Object.fromEntries(
+          (stockRes?.items || []).map((item) => [item.sku, item]),
+        ) as Record<string, StockLevel>;
+        setServerStock(stockBySku);
         setLoading(false);
 
         const skus = skuRes?.skus || [];
@@ -203,7 +210,7 @@ export default function Dashboard() {
             batch.map((sku, batchIdx) => {
               const globalIdx = i + batchIdx;
               const demo = computeDemoStock(sku.avg_demand, globalIdx);
-              const stock = getStockForSku(sku.id, demo);
+              const stock = stockBySku[sku.id]?.quantity_on_hand ?? getStockForSku(sku.id, demo);
               return api.analyzeSku(sku.id, stock).catch(() => null);
             })
           );
@@ -269,8 +276,13 @@ export default function Dashboard() {
       return;
     }
     const next = Math.round(parsed);
-    setStockForSku(sku, next);
-    setStockVersion((v) => v + 1);
+    const updated = await api.updateStockForSku(sku, next).catch(() => null);
+    if (updated) {
+      setServerStock((prev) => ({ ...prev, [sku]: updated }));
+    } else {
+      setStockForSku(sku, next);
+      setStockVersion((v) => v + 1);
+    }
     setEditingStock(null);
     const refreshed = await api.analyzeSku(sku, next).catch(() => null);
     if (refreshed) {
@@ -533,8 +545,9 @@ export default function Dashboard() {
                       const demo = computeDemoStock(sku.avg_demand, skuDetails.indexOf(sku));
                       // stockVersion is read to force re-render after localStorage edits.
                       void stockVersion;
-                      const stock = getStockForSku(sku.id, demo);
-                      const origin = getStockOrigin(sku.id);
+                      const server = serverStock[sku.id];
+                      const stock = server?.quantity_on_hand ?? getStockForSku(sku.id, demo);
+                      const origin = server ? "server" : getStockOrigin(sku.id);
                       const isEditing = editingStock?.sku === sku.id;
                       const borderClass = a ? riskBorder[a.risk] || "border-l-gray-700" : "border-l-gray-800";
                       return (
@@ -590,11 +603,13 @@ export default function Dashboard() {
                                   title={
                                     origin === "user"
                                       ? "Stored locally in your browser. Click to edit."
+                                      : origin === "server"
+                                        ? "Stored by the backend stock API. Click to edit."
                                       : "Demo value. Click to override with real stock."
                                   }
                                 >
                                   {stock}
-                                  {origin === "user" && (
+                                  {origin !== "demo" && (
                                     <span className="w-1 h-1 rounded-full bg-emerald-400" aria-hidden="true" />
                                   )}
                                   <Pencil className="w-3 h-3 text-gray-600 group-hover:text-gray-400 transition-colors" aria-hidden="true" />
@@ -660,7 +675,7 @@ export default function Dashboard() {
             <div className="px-4 py-3 border-t border-gray-800/50 text-[11px] text-gray-500 leading-relaxed">
               Stock values default to <span className="text-amber-300 font-medium">demo levels</span> derived from each
               SKU&apos;s average demand. Click any stock cell to type a real value — overrides
-              are <span className="text-emerald-300 font-medium">stored locally</span> in your
+              are <span className="text-emerald-300 font-medium">server stored</span> when the stock API is available; otherwise they remain local in your
               browser (green dot appears). Method badges identify how each recommendation was produced —{" "}
               <span className="text-cyan-300">model</span>, <span className="text-violet-300">statistical</span>, or{" "}
               <span className="text-amber-300">rule-based fallback</span>.
