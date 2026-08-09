@@ -21,7 +21,8 @@ project combines:
 - Croston-SBA / conservative statistical methods for sparse demand,
 - reorder-point inventory math,
 - server-side stock persistence through SQLAlchemy repositories,
-- local/demo analysis persistence through SQLite,
+- SQLAlchemy-backed analysis history and prediction logging,
+- versioned LightGBM artifact metadata with checksum and feature schema,
 - reproducible evaluation and simulation scripts.
 
 The project is intentionally a clean modular monolith. It is not a
@@ -145,14 +146,15 @@ shown to the user.
 
 Read:
 
-- [backend/src/storage/analysis_store.py](../backend/src/storage/analysis_store.py)
+- [backend/src/services/analysis_service.py](../backend/src/services/analysis_service.py)
+- [backend/src/repositories/analysis_repository.py](../backend/src/repositories/analysis_repository.py)
 - [backend/src/services/stock_service.py](../backend/src/services/stock_service.py)
 - [backend/src/repositories/stock_repository.py](../backend/src/repositories/stock_repository.py)
 - [backend/src/db/models.py](../backend/src/db/models.py)
 - [backend/tests/](../backend/tests)
 
-Goal: understand the old local analysis persistence, the newer service/repo
-stock path, and how behavior is protected by tests.
+Goal: understand the service/repository persistence path, the stock path, and
+how behavior is protected by tests.
 
 ## 4. What Happens When a User Clicks Analyze?
 
@@ -169,13 +171,13 @@ Frontend
   -> api.analyzeSku(...)
   -> POST /api/analyze
   -> main.py validates AnalyzeRequest
-  -> resolve demand history
+  -> AnalysisService resolves demand history
   -> IntelligentInventoryService
   -> adaptive forecast routing
   -> reorder-point calculation
   -> business constraints
   -> response composition
-  -> AnalysisStore snapshot
+  -> AnalysisRepository writes analysis_runs + prediction_logs
   -> frontend renders recommendation
 ```
 
@@ -240,6 +242,8 @@ demand history
 Important files:
 
 - [backend/src/services/adaptive_forecasting_service.py](../backend/src/services/adaptive_forecasting_service.py)
+- [backend/src/services/model_service.py](../backend/src/services/model_service.py)
+- [backend/src/features/schema.py](../backend/src/features/schema.py)
 - [backend/src/features/inference_features.py](../backend/src/features/inference_features.py)
 - [backend/src/forecasting/forecast_service.py](../backend/src/forecasting/forecast_service.py)
 - [backend/src/services/model_service.py](../backend/src/services/model_service.py)
@@ -253,6 +257,11 @@ LightGBM and uses statistical methods:
 This is not a weakness. The committed evaluation artifact shows LightGBM is not
 dominant on sparse retail demand, especially intermittent SKUs. That is why the
 project uses adaptive routing instead of forcing every SKU through one model.
+
+LightGBM artifact identity is separate from forecast method selection. The
+method is `ml_lightgbm`; the artifact is the exact `.pkl` version/checksum
+loaded by `ModelService`. Prediction logs keep `model_artifact_id`,
+`model_version`, and `feature_schema_version`.
 
 ## 7. Where Is the Inventory Logic?
 
@@ -295,17 +304,19 @@ The backend is a FastAPI app in [backend/main.py](../backend/main.py). It owns:
 
 The backend currently has two architecture styles:
 
-### Older analyze path
+### Analyze path
 
 ```text
 HTTP route
-  -> main.py orchestration
+  -> AnalysisService
   -> IntelligentInventoryService
-  -> AnalysisStore
+  -> AnalysisRepository
+  -> SQLAlchemy
 ```
 
-This path works and is well tested, but `main.py` still owns too much response
-composition. A future refactor should extract `AnalysisService`.
+This path keeps route handlers focused on HTTP concerns. `AnalysisService`
+owns demand resolution, forecasting orchestration, response composition,
+explanations, and persistence.
 
 ### Newer stock path
 
@@ -363,15 +374,9 @@ stock endpoint is unavailable or no server-side stock has been recorded yet.
 
 ## 10. How Does the Database Fit In?
 
-There are currently two persistence layers:
-
-### Local/demo analysis persistence
-
-[backend/src/storage/analysis_store.py](../backend/src/storage/analysis_store.py)
-uses Python `sqlite3` to persist recent `/api/analyze` snapshots. This powers
-the recent analyses panel and keeps the demo from feeling fully transient.
-
-### SQLAlchemy stock and future production persistence
+Runtime persistence is SQLAlchemy-backed. Local development defaults to a
+SQLite SQLAlchemy URL for convenience, while Docker/CI/production should use
+PostgreSQL through `DATABASE_URL`.
 
 The newer database foundation is:
 
@@ -391,9 +396,7 @@ The schema includes tables for:
 - forecast evaluations,
 - model artifacts.
 
-Only server-side stock endpoints are wired into the new SQLAlchemy path today.
-Analysis runs still use the older SQLite `AnalysisStore`. That split is
-intentional during the migration, but it should not remain forever.
+Server-side stock endpoints, analysis history, and prediction logs all use the service/repository/SQLAlchemy path. The FastAPI runtime does not keep a secondary SQLite analysis-store fallback.
 
 ## 11. How Do I Debug It?
 
@@ -407,6 +410,7 @@ If `model_loaded` is false:
 
 - Check `backend/saved_models/`.
 - Run `python backend/scripts/bootstrap.py`.
+- Run `python backend/scripts/check_setup.py` to validate checksum and feature schema.
 - Check `MODEL_PATH`.
 
 If `data_available` is false:
@@ -477,6 +481,7 @@ Real:
 
 - Historical demand from the processed dataset.
 - LightGBM inference when the artifact is loaded.
+- LightGBM artifact checksum/version/feature-schema validation.
 - Croston/conservative statistical forecasting.
 - Reorder point and safety stock calculations.
 - Business constraints.
@@ -489,28 +494,21 @@ Demo or limited:
 
 - The dataset is public retail data, not a live business feed.
 - Unknown SKUs use deterministic synthetic demand.
-- Recent analysis persistence still uses a local SQLite `AnalysisStore`.
+- Analysis persistence requires the SQLAlchemy database to be migrated and
+  reachable.
 - Authentication is demo-grade, not production identity.
-- Frontend stock falls back to browser storage when the stock API has no value.
+- Frontend stock falls back to browser storage only as degraded demo behavior when no server-side value is available.
 
-In progress:
-
-- Full migration from local analysis SQLite to SQLAlchemy repositories.
-- Prediction logging into `prediction_logs`.
-- Evidence-based model routing from stored forecast evaluations.
-- Extracting `/api/analyze` orchestration into `AnalysisService`.
-- Auditing unused CopilotKit scaffolding.
+Future scope:\r\n\r\n- More logged prediction evaluations as forecast windows mature.\r\n- Manual model promotion is CLI-only; there is no admin UI.\r\n- Production identity, organization boundaries, and operational monitoring are intentionally out of scope for the current student-scale monolith.
 
 ## 14. What Should Be Improved Next?
 
-The highest-value next PR is to extract an `AnalysisService` for
-`POST /api/analyze` while preserving the exact API response shape.
+The highest-value next improvement is to make the deployment workflow easier to operate without adding new product scope.
 
 Why:
 
-- `main.py` currently owns too much orchestration.
-- Prediction logging should not be added directly to the route.
-- The newer stock flow already shows the preferred architecture:
+- The service/repository boundary now exists.
+- Local setup should stay simple enough that the owner can run and explain it without Docker.\r\n- Deployment docs should clearly separate required secrets from optional demo-auth settings.
 
 ```text
 HTTP route

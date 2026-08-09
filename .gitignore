@@ -12,9 +12,11 @@ venv/
 
 # Local/demo persistence (created on first /api/analyze call)
 *.sqlite
+*.db
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+logs/
 
 # Node
 node_modules/
@@ -26,6 +28,8 @@ node_modules/
 
 # Editor / assistant tooling
 .claude/
+.agents/
+.codex/
 .vscode/
 .idea/
 
@@ -35,6 +39,8 @@ Thumbs.db
 
 # Large raw datasets — users download these separately (see README Quickstart)
 data/raw/*.csv
+data/raw/*.xlsx
+data/raw/*.zip
 
 # Next.js build output
 frontend/.next/

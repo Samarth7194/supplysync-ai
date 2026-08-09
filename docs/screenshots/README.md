@@ -4,7 +4,7 @@ This folder holds real screenshots of the running app. The root `README.md` refe
 
 **Ground rules:**
 - Real captures only (from a local `make backend` + `make frontend` session). No wireframes, no design mocks, no hand-edited numbers.
-- **Don't crop out the `DEMO` pill, the amber synthetic-data banner, or the "Stored locally" pill.** Those are honesty signals — the whole point is that reviewers see them.
+- **Don't crop out the `DEMO` pill, the amber synthetic-data banner, or the stock provenance pill.** Those are honesty signals; reviewers should see where values came from.
 - Recommended: 1440–1600 px wide, PNG. Retina-scale is fine.
 
 ---
@@ -55,14 +55,14 @@ Save each file under `docs/screenshots/` with the exact filename below so the ro
 - **URL:** `http://localhost:3000/sku/85099B`
 - **Pre-state:** Click the **Current stock** input in the Planning Assumptions card. Type a value that flips the risk band (try `5` to force HIGH, or `500` to force LOW). Press Enter or blur so the analysis re-runs.
 - **Capture:** Viewport screenshot.
-- **What to show:** The Current stock input with the user-entered value, the **"Stored locally" pill** next to it (replacing the default "Demo value" pill), and the hero recommendation reflecting the new stock. This is the realism-pass proof.
+- **What to show:** The Current stock input with the user-entered value, the stock provenance pill, and the hero recommendation reflecting the new stock.
 
 ---
 
 ## Optional extras
 
 - `06-dashboard-mobile.png` — `375 × 812` viewport of the dashboard, showing the responsive pipeline divider and single-column KPI stack.
-- `07-recent-analyses.png` — zoomed-in crop of the Recent analyses panel with several `SQLITE · LOCAL` tagged rows.
+- `07-recent-analyses.png` — zoomed-in crop of the Recent analyses panel with several persisted rows.
 - `08-cross-sku-cli.png` — terminal screenshot of `python scripts/evaluate_cross_sku.py --folds 5` output. Good supporting image for the bring-your-own-data section.
 
 ---

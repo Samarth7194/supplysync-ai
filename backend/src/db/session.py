@@ -10,6 +10,8 @@ from collections.abc import Generator
 
 from sqlalchemy import create_engine
 from sqlalchemy.engine import Engine
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import text
 from sqlalchemy.orm import Session, sessionmaker
 
 from config.settings import load_settings
@@ -40,8 +42,8 @@ SessionLocal = sessionmaker(
 def get_session() -> Generator[Session, None, None]:
     """FastAPI dependency-style session scope.
 
-    This is intentionally not imported by main.py yet. The next migration step
-    can inject repositories through services while keeping route handlers clean.
+    Route dependencies use this to inject repositories into services while
+    keeping direct SQLAlchemy calls out of route handlers.
     """
     with SessionLocal() as session:
         try:
@@ -50,3 +52,19 @@ def get_session() -> Generator[Session, None, None]:
         except Exception:
             session.rollback()
             raise
+
+
+def database_health() -> dict[str, object]:
+    """Return a lightweight, credential-safe database readiness snapshot."""
+    payload: dict[str, object] = {
+        "configured": True,
+        "reachable": False,
+        "dialect": engine.dialect.name,
+    }
+    try:
+        with engine.connect() as connection:
+            connection.execute(text("select 1"))
+        payload["reachable"] = True
+    except SQLAlchemyError as exc:
+        payload["error"] = type(exc).__name__
+    return payload

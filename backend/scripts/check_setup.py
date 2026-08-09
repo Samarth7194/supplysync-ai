@@ -57,6 +57,23 @@ def _check_python_deps() -> bool:
     return True
 
 
+def _check_model_integrity() -> bool:
+    sys.path.insert(0, str(BACKEND_DIR / "src"))
+    from services.model_service import ModelService  # noqa: PLC0415
+
+    service = ModelService(model_dir=str(BACKEND_DIR / "saved_models"))
+    status = service.artifact_status("lightgbm_demand_forecast")
+    if status["valid"]:
+        print(
+            "  [OK]       Model integrity "
+            f"(version={status.get('version')}, feature_schema={status.get('feature_schema_version')})"
+        )
+        return True
+    print(f"  [MISSING]  Model integrity check failed: {status.get('error')}")
+    print("             Fix: cd backend && python scripts/train_model.py")
+    return False
+
+
 def main() -> int:
     print("SupplySync setup check")
     print("=" * 60)
@@ -110,6 +127,8 @@ def main() -> int:
             print(f"             Needed for: {chk.required_for}")
             print(f"             Fix: {chk.how_to_fix}")
             all_ok = False
+
+    all_ok = all_ok and _check_model_integrity()
 
     print()
     if all_ok:

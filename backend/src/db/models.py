@@ -1,8 +1,7 @@
 """SQLAlchemy models for the target persistence schema.
 
-These mappings mirror docs/database-design.md. They are intentionally not wired
-into the current FastAPI routes yet; repositories will become the integration
-point for future migration steps.
+These mappings mirror docs/database-design.md. Runtime code reaches them
+through repository and service layers, keeping SQLAlchemy out of route handlers.
 """
 
 from __future__ import annotations
@@ -163,6 +162,7 @@ class PredictionLog(Base):
     routing_reason: Mapped[str | None] = mapped_column(Text)
     model_name: Mapped[str | None] = mapped_column(String(128))
     model_version: Mapped[str | None] = mapped_column(String(128))
+    feature_schema_version: Mapped[str | None] = mapped_column(String(64))
     model_artifact_id: Mapped[int | None] = mapped_column(ForeignKey("model_artifacts.id"), index=True)
     input_history_length: Mapped[int] = mapped_column(Integer, nullable=False)
     forecast_horizon_days: Mapped[int] = mapped_column(Integer, nullable=False)
@@ -183,6 +183,11 @@ class ForecastEvaluation(Base):
     __tablename__ = "forecast_evaluations"
 
     id: Mapped[int] = mapped_column(primary_key=True)
+    prediction_log_id: Mapped[int | None] = mapped_column(
+        ForeignKey("prediction_logs.id"),
+        unique=True,
+        index=True,
+    )
     model_artifact_id: Mapped[int | None] = mapped_column(ForeignKey("model_artifacts.id"), index=True)
     sku_id: Mapped[int | None] = mapped_column(ForeignKey("skus.id"), index=True)
     sku_code: Mapped[str | None] = mapped_column(String(64))
@@ -203,28 +208,42 @@ class ForecastEvaluation(Base):
 
     model_artifact: Mapped["ModelArtifact | None"] = relationship(back_populates="forecast_evaluations")
     sku: Mapped[Sku | None] = relationship(back_populates="forecast_evaluations")
+    prediction_log: Mapped[PredictionLog | None] = relationship()
 
 
 class ModelArtifact(Base):
     __tablename__ = "model_artifacts"
     __table_args__ = (
         UniqueConstraint("model_name", "version", name="uq_model_artifacts_name_version"),
+        UniqueConstraint("artifact_checksum", name="uq_model_artifacts_artifact_checksum"),
+        CheckConstraint(
+            "lifecycle_status in ('candidate', 'active', 'retired', 'failed')",
+            name="ck_model_artifacts_lifecycle_status",
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
     model_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    model_family: Mapped[str | None] = mapped_column(String(64), index=True)
     model_type: Mapped[str] = mapped_column(String(64), nullable=False, index=True)
     version: Mapped[str] = mapped_column(String(128), nullable=False)
+    artifact_checksum: Mapped[str | None] = mapped_column(String(64))
+    checksum_algorithm: Mapped[str | None] = mapped_column(String(16))
     artifact_uri: Mapped[str | None] = mapped_column(Text)
     metadata_uri: Mapped[str | None] = mapped_column(Text)
     feature_schema: Mapped[list[str] | None] = mapped_column(JSON)
+    feature_schema_version: Mapped[str | None] = mapped_column(String(64))
+    feature_schema_checksum: Mapped[str | None] = mapped_column(String(64))
     training_dataset: Mapped[str | None] = mapped_column(Text)
     training_started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     training_finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     training_metrics: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    training_metadata: Mapped[dict[str, Any] | None] = mapped_column(JSON)
+    lifecycle_status: Mapped[str] = mapped_column(String(32), nullable=False, default="candidate", server_default="candidate", index=True)
     is_active: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false", index=True)
+    activated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    retired_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
     forecast_evaluations: Mapped[list[ForecastEvaluation]] = relationship(back_populates="model_artifact")
     prediction_logs: Mapped[list[PredictionLog]] = relationship(back_populates="model_artifact")
-

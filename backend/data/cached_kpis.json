@@ -1,11 +1,11 @@
 {
-  "total_cost": 1647932.0,
+  "total_cost": 1645905.0,
   "fill_rate": 0.9567,
-  "cost_savings_pct": 37.8,
-  "holding_cost": 1624917.0,
-  "stockout_cost": 23015.0,
+  "cost_savings_pct": 37.9,
+  "holding_cost": 1622790.0,
+  "stockout_cost": 23115.0,
   "naive_total_cost": 2650120.0,
-  "intelligent_total_cost": 1647932.0,
+  "intelligent_total_cost": 1645905.0,
   "skus_analyzed": 10,
-  "computed_at": "2026-04-01T13:18:17.588264"
+  "computed_at": "2026-05-23T14:10:18.808785"
 }

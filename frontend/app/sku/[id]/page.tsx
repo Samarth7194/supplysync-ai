@@ -36,6 +36,7 @@ import {
   clearStockForSku,
   type StockOrigin,
 } from "@/lib/stock";
+import { formatDemandPattern, formatForecastMethod } from "@/lib/utils";
 
 const API = env.apiUrl;
 const HISTORY_DAYS = 30;
@@ -63,7 +64,13 @@ interface Analysis {
   sku: string;
   risk: string;
   risk_color: string;
-  forecast: { p50: number; p90: number };
+  forecast: {
+    p50: number;
+    p90: number;
+    daily?: number[];
+    full_horizon_daily?: number[];
+    horizon_days?: number;
+  };
   current_stock: number;
   recommended_order: number;
   action: string;
@@ -74,6 +81,11 @@ interface Analysis {
   decision?: DecisionBlock;
   model_info?: ModelInfo;
   explanation?: ExplanationBlock;
+}
+
+function formatUnits(value: number | null | undefined): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return `${Math.round(value).toLocaleString()} units`;
 }
 
 interface HistoryPoint {
@@ -150,9 +162,8 @@ export default function SKUDetail() {
   const [serviceLevelPct, setServiceLevelPct] = useState<number>(95);
   const [reAnalyzing, setReAnalyzing] = useState(false);
 
-  // Current stock — user-editable, persisted per-SKU in localStorage.
-  // Initial value is the deterministic demo fallback; if the user has set a
-  // value for this SKU before, getStockForSku returns it instead.
+  // Current stock comes from the stock API when available, with a browser
+  // fallback for local demo use.
   const [currentStock, setCurrentStock] = useState<number>(0);
   const [stockOrigin, setStockOrigin] = useState<StockOrigin>("demo");
   const [stockDraft, setStockDraft] = useState<string>("");
@@ -362,6 +373,11 @@ export default function SKUDetail() {
                           Order {analysis.recommended_order}
                         </span>
                         <span className="text-sm text-gray-400">units</span>
+                        {analysis.decision?.constraints?.max_order_cap_applied && (
+                          <span className="text-[10px] font-semibold uppercase tracking-[0.16em] text-amber-300 border border-amber-500/30 bg-amber-500/10 rounded-full px-2 py-1">
+                            Max order cap
+                          </span>
+                        )}
                       </>
                     ) : (
                       <span className="text-3xl md:text-[36px] font-bold text-white tracking-tight">
@@ -386,12 +402,12 @@ export default function SKUDetail() {
             <div className="px-6 py-3 border-t border-gray-800/60 bg-gray-900/40 flex flex-wrap items-center gap-x-6 gap-y-2 text-xs">
               <div className="flex items-center gap-2">
                 <span className="text-gray-500 uppercase tracking-wider text-[10px]">Pattern</span>
-                <span className="text-purple-300 font-medium">{analysis.demand_pattern}</span>
+                <span className="text-purple-300 font-medium">{formatDemandPattern(analysis.demand_pattern)}</span>
               </div>
               <div className="h-3 w-px bg-gray-800 hidden sm:block" />
               <div className="flex items-center gap-2">
                 <span className="text-gray-500 uppercase tracking-wider text-[10px]">Forecast</span>
-                <span className="text-cyan-300 font-medium">{analysis.forecast_method}</span>
+                <span className="text-cyan-300 font-medium">{formatForecastMethod(analysis.forecast_method)}</span>
                 <DataSourceBadge kind={forecastSourceKind(analysis.forecast_source)} />
               </div>
               <div className="h-3 w-px bg-gray-800 hidden sm:block" />
@@ -412,7 +428,7 @@ export default function SKUDetail() {
               compact
               eyebrow="Interactive"
               title="Planning assumptions"
-              subtitle="Change a slider or type a real stock value. Releasing the slider or pressing Enter re-runs the backend analysis — reorder point, recommended quantity, and risk update live. Stock overrides persist locally in your browser."
+              subtitle="Change a slider or type a stock value. Releasing the slider or pressing Enter re-runs the analysis."
               right={
                 reAnalyzing ? (
                   <span className="text-[11px] text-gray-400 inline-flex items-center gap-2">
@@ -517,7 +533,7 @@ export default function SKUDetail() {
                     }`}
                     title={
                       stockOrigin === "user"
-                        ? "You've set this value — stored locally in your browser."
+                        ? "Saved locally as a demo fallback."
                         : stockOrigin === "server"
                           ? "Stored by the backend stock API."
                           : "Demo value derived from this SKU's average demand."
@@ -526,7 +542,7 @@ export default function SKUDetail() {
                     {stockOrigin === "server"
                       ? "Server stored"
                       : stockOrigin === "user"
-                        ? "Stored locally"
+                        ? "Local fallback"
                         : "Demo value"}
                   </span>
                 </div>
@@ -635,7 +651,7 @@ export default function SKUDetail() {
                   )}
                 </span>
               }
-              subtitle="Each blue bar is the real number of units sold on that day, pulled directly from the processed sales dataset — no forecasts, no imputation. Dashed lines are forecast reference levels, not past sales."
+              subtitle="Each blue bar is the real number of units sold on that day, pulled directly from the processed sales dataset. Dashed lines are historical demand reference levels, not future forecast lines."
               right={
                 analysis && (
                   <div className="flex items-center gap-3 text-[11px] text-gray-500 flex-wrap">
@@ -644,10 +660,10 @@ export default function SKUDetail() {
                       <span className="text-gray-300">Actual units sold</span>
                     </span>
                     <span className="inline-flex items-center gap-1.5">
-                      <span className="w-3 border-t border-dashed border-green-500" /> P50 forecast
+                      <span className="w-3 border-t border-dashed border-green-500" /> Historical avg
                     </span>
                     <span className="inline-flex items-center gap-1.5">
-                      <span className="w-3 border-t border-dashed border-red-500" /> P90 forecast
+                      <span className="w-3 border-t border-dashed border-red-500" /> Historical P90
                     </span>
                     <span className="inline-flex items-center gap-1.5">
                       <span className="w-3 h-px bg-yellow-500" /> Current stock
@@ -680,13 +696,13 @@ export default function SKUDetail() {
                       y={analysis.forecast.p50}
                       stroke="#22c55e"
                       strokeDasharray="6 3"
-                      label={{ value: `P50 forecast: ${analysis.forecast.p50}`, position: "right", fill: "#22c55e", fontSize: 11 }}
+                      label={{ value: `Historical avg: ${analysis.forecast.p50}`, position: "right", fill: "#22c55e", fontSize: 11 }}
                     />
                     <ReferenceLine
                       y={analysis.forecast.p90}
                       stroke="#ef4444"
                       strokeDasharray="6 3"
-                      label={{ value: `P90 forecast: ${analysis.forecast.p90}`, position: "right", fill: "#ef4444", fontSize: 11 }}
+                      label={{ value: `Historical P90: ${analysis.forecast.p90}`, position: "right", fill: "#ef4444", fontSize: 11 }}
                     />
                     <ReferenceLine
                       y={stock}
@@ -807,9 +823,43 @@ export default function SKUDetail() {
                   title="Why this quantity"
                 />
                 {analysis.decision?.why ? (
-                  <p className="text-xs text-gray-300 leading-relaxed">
-                    {analysis.decision.why}
-                  </p>
+                  <div className="space-y-4">
+                    <p className="text-xs text-gray-300 leading-relaxed">
+                      {analysis.decision.why}
+                    </p>
+                    {analysis.decision.constraints?.constrained && (
+                      <div className="rounded-lg border border-gray-800 bg-gray-950/60 p-3 space-y-2">
+                        <div className="flex items-center justify-between gap-4 text-xs">
+                          <span className="text-gray-500">Raw requirement</span>
+                          <span className="font-mono tabular-nums text-white">
+                            {formatUnits(analysis.decision.constraints.raw_order_quantity)}
+                          </span>
+                        </div>
+                        {analysis.decision.constraints.max_order_cap_applied && (
+                          <div className="flex items-center justify-between gap-4 text-xs">
+                            <span className="text-gray-500">Supplier max order</span>
+                            <span className="font-mono tabular-nums text-amber-300">
+                              {formatUnits(analysis.decision.constraints.max_order_quantity)}
+                            </span>
+                          </div>
+                        )}
+                        <div className="flex items-center justify-between gap-4 text-xs">
+                          <span className="text-gray-500">Final recommendation</span>
+                          <span className="font-mono tabular-nums text-green-300">
+                            {formatUnits(analysis.decision.constraints.final_order_quantity)}
+                          </span>
+                        </div>
+                        {analysis.decision.constraints.remaining_gap_after_order > 0 && (
+                          <div className="flex items-center justify-between gap-4 border-t border-gray-800 pt-2 text-xs">
+                            <span className="text-gray-500">Remaining gap after this order</span>
+                            <span className="font-mono tabular-nums text-red-300">
+                              {formatUnits(analysis.decision.constraints.remaining_gap_after_order)}
+                            </span>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 ) : (
                   <p className="text-xs text-gray-500">
                     {analysis.action === "PURCHASE"
@@ -844,7 +894,7 @@ export default function SKUDetail() {
                   </div>
                   <div>
                     <p className="text-[11px] text-gray-500 uppercase tracking-wider">
-                      P50 forecast
+                      Historical avg
                     </p>
                     <p className="text-2xl font-bold text-green-400 tabular-nums mt-1">
                       {analysis.forecast.p50}
@@ -852,7 +902,7 @@ export default function SKUDetail() {
                   </div>
                   <div>
                     <p className="text-[11px] text-gray-500 uppercase tracking-wider">
-                      P90 forecast
+                      Historical P90
                     </p>
                     <p className="text-2xl font-bold text-red-400 tabular-nums mt-1">
                       {analysis.forecast.p90}
@@ -953,7 +1003,7 @@ export default function SKUDetail() {
                   <p className="text-sm font-semibold text-white">1. Classify</p>
                   <p className="text-xs text-gray-400 mt-1">
                     Demand pattern:{" "}
-                    <span className="text-purple-400 font-medium">{analysis.demand_pattern}</span>.{" "}
+                    <span className="text-purple-400 font-medium">{formatDemandPattern(analysis.demand_pattern)}</span>.{" "}
                     {PATTERN_REASONS[analysis.demand_pattern] || ""}
                   </p>
                 </div>
@@ -969,7 +1019,7 @@ export default function SKUDetail() {
                 <div>
                   <p className="text-sm font-semibold text-white">2. Forecast</p>
                   <p className="text-xs text-gray-400 mt-1">
-                    Method: <span className="text-cyan-400 font-medium">{analysis.forecast_method}</span>.
+                    Method: <span className="text-cyan-400 font-medium">{formatForecastMethod(analysis.forecast_method)}</span>.
                     {analysis.decision && (
                       <>
                         {" "}Projected demand over the next{" "}
@@ -1066,3 +1116,5 @@ export default function SKUDetail() {
     </div>
   );
 }
+
+

@@ -3,7 +3,7 @@
 import React from "react";
 import type { DemandSource, ForecastSource } from "@/lib/api";
 
-// Provenance vocabulary — keep in sync with backend main.py._classify_forecast_source
+// Provenance vocabulary: keep in sync with analysis_service.classify_forecast_source
 // and the demand_source values returned by /api/analyze.
 export type ProvenanceKind =
   | "recorded"
@@ -29,8 +29,8 @@ const COPY: Record<ProvenanceKind, { label: string; tooltip: string; className: 
     className: "bg-sky-500/10 text-sky-300 border-sky-500/30",
   },
   user_stored: {
-    label: "Stored locally",
-    tooltip: "You've set this value. It's stored in your browser's localStorage, not on any server.",
+    label: "Local fallback",
+    tooltip: "Saved locally as a demo fallback.",
     className: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30",
   },
   server_stored: {
@@ -115,3 +115,4 @@ export function forecastSourceKind(
       return "unavailable";
   }
 }
+

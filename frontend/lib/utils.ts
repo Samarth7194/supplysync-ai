@@ -25,3 +25,22 @@ export function formatRelativeTime(iso: string | Date): string {
   if (deltaDay < 30) return `${deltaDay}d ago`;
   return then.toISOString().slice(0, 10);
 }
+
+export function formatForecastMethod(method: string | null | undefined): string {
+  const labels: Record<string, string> = {
+    ml_lightgbm: "LightGBM",
+    croston: "Croston",
+    conservative: "Conservative",
+    simple_average: "Simple Average",
+  };
+  return method ? labels[method] ?? method : "";
+}
+
+export function formatDemandPattern(pattern: string | null | undefined): string {
+  const labels: Record<string, string> = {
+    regular: "Regular",
+    intermittent: "Intermittent",
+    highly_intermittent: "Highly Intermittent",
+  };
+  return pattern ? labels[pattern] ?? pattern : "";
+}

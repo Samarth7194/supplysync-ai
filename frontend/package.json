@@ -16,12 +16,6 @@
     "clean": "rimraf .next out tsconfig.tsbuildinfo"
   },
   "dependencies": {
-    "@base-ui/react": "^1.3.0",
-    "@copilotkit/react-core": "^1.54.0",
-    "@copilotkit/react-textarea": "^1.54.0",
-    "@copilotkit/react-ui": "^1.54.0",
-    "@copilotkit/runtime": "^1.54.0",
-    "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.577.0",
     "next": "16.2.0",
@@ -38,7 +32,6 @@
     "eslint": "^9",
     "eslint-config-next": "16.2.0",
     "rimraf": "^6.0.1",
-    "shadcn": "^4.0.8",
     "tailwindcss": "^4",
     "typescript": "^5"
   }

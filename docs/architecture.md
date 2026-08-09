@@ -73,7 +73,10 @@ train_model.py                           evaluate_forecast.py
                                               └ write forecast_evaluation.{json,csv}
 ```
 
-Model metadata captures the feature schema, train-SKU list, training MAE/RMSE, and ISO-timestamped `saved_at`. The evaluation artifact captures the generator timestamp, per-SKU metrics, and aggregates with the same vocabulary the UI uses.
+Model metadata captures the feature schema, train-SKU list, training MAE/RMSE,
+ISO-timestamped `saved_at`, artifact checksum, explicit version, feature-schema
+version, and lifecycle status. The evaluation artifact captures the generator
+timestamp, per-SKU metrics, and aggregates with the same vocabulary the UI uses.
 
 ## 4. Live analyze flow
 
@@ -148,11 +151,151 @@ Every surface that displays a value renders its provenance via the shared [`Data
 | Uncertainty | [`dynamic_sigma.py`](../backend/src/uncertainty/dynamic_sigma.py), [`prediction_intervals.py`](../backend/src/uncertainty/prediction_intervals.py) |
 | Evaluation | [`evaluation/metrics.py`](../backend/src/evaluation/metrics.py), [`evaluation/baselines.py`](../backend/src/evaluation/baselines.py), [`scripts/evaluate_forecast.py`](../backend/scripts/evaluate_forecast.py) |
 | Simulation | [`inventory_simulator.py`](../backend/src/simulation/inventory_simulator.py), [`enhanced_simulator.py`](../backend/src/simulation/enhanced_simulator.py) |
-| Decision composition | [`intelligent_inventory_service.py`](../backend/src/services/intelligent_inventory_service.py), `_compose_decision_why` in [`main.py`](../backend/main.py) |
-| Provenance vocabulary | `_FORECAST_SOURCE_BY_METHOD`, `_model_info_for_method` in [`main.py`](../backend/main.py) + [`DataSourceBadge.tsx`](../frontend/components/DataSourceBadge.tsx) |
+| Decision composition | [`analysis_service.py`](../backend/src/services/analysis_service.py), [`intelligent_inventory_service.py`](../backend/src/services/intelligent_inventory_service.py) |
+| Provenance vocabulary | `classify_forecast_source`, `_model_info_for_method` in [`analysis_service.py`](../backend/src/services/analysis_service.py) + [`DataSourceBadge.tsx`](../frontend/components/DataSourceBadge.tsx) |
 
 ## 8. What is real vs demo
 
 - **Real**: demand history from the parquet (fed to analyze when the SKU is known), the trained LightGBM predictions when the pkl is loaded, Croston / conservative forecasts, simulated KPIs, evaluation numbers.
 - **Demo**: `current_stock` shown on the dashboard and SKU page (derived from each SKU's average demand — clearly labeled with a `DEMO` pill). A real integration would pass live stock as the `current_stock` request field.
 - **Synthetic fallback**: Poisson(20) demand when the requested SKU isn't in the processed dataset — flagged with `demand_source: "synthetic"` and an amber page-top banner.
+
+## 9. Analysis Service Boundary
+
+The analyze path has been moved toward the same service/repository layering as
+the stock path:
+
+```text
+FastAPI route
+  -> AnalysisService
+  -> DataService / IntelligentInventoryService
+  -> AnalysisRepository
+  -> SQLAlchemy
+```
+
+`backend/main.py` still defines the HTTP route, request model, and response
+model for backward compatibility. The orchestration now lives in
+`backend/src/services/analysis_service.py`, which owns:
+
+- demand-history resolution,
+- request-provided versus historical versus synthetic demand provenance,
+- invocation of `IntelligentInventoryService`,
+- risk bucket calculation,
+- response data composition,
+- deterministic explanation text,
+- SQLAlchemy analysis persistence,
+- linked prediction-log creation.
+
+`GET /api/analyses/recent` uses the same service and reads SQLAlchemy
+`analysis_runs` rows. If persistence is unavailable, the API returns a 503
+instead of silently writing to a second local store.
+
+The SQLAlchemy write path stores two rows together through
+`AnalysisRepository`:
+
+```text
+analysis_runs
+  -> prediction_logs
+```
+
+The repository does not commit directly. The FastAPI SQLAlchemy session
+dependency owns commit/rollback, which keeps transaction ownership in one
+place.
+
+## 10. Logged Prediction Evaluation
+
+Logged prediction evaluation is separate from offline model benchmarking.
+
+```text
+POST /api/analyze
+  -> analysis_runs
+  -> prediction_logs
+  -> forecast horizon completes
+  -> DataService recorded actual demand
+  -> ForecastEvaluationService
+  -> forecast_evaluations
+```
+
+`prediction_logs` records the forecast method, source, horizon, target window,
+model name/version, optional `sku_id`, optional `model_artifact_id`, forecast
+values, and recommended quantity. SQLAlchemy links `analysis_runs` to the
+prediction log that came from the request.
+
+`ForecastEvaluationService` evaluates only predictions whose target window has
+completed and whose actual demand window is available from `DataService`.
+It does not evaluate synthetic/request-only predictions unless a valid recorded
+actual window exists for the SKU. It never invents actuals.
+
+Metric computation reuses `backend/src/evaluation/metrics.py`: MAE, RMSE,
+bias, WAPE, and MASE. WAPE remains nullable when actual demand sums to zero,
+which avoids MAPE-style failures on intermittent demand.
+
+Offline files such as `backend/data/forecast_evaluation.json` remain model
+benchmark evidence. Rows with `evaluation_scope="logged_prediction"` are
+post-hoc evaluations of individual persisted predictions.
+
+## 11. Model Artifact Lifecycle
+
+The LightGBM model path is versioned and validated:
+
+```text
+train_model.py
+  -> lightgbm_demand_forecast.pkl
+  -> metadata JSON with checksum/version/feature schema
+  -> register_model_artifact.py
+  -> model_artifacts(status=candidate)
+  -> evaluate
+  -> promote_model.py
+  -> model_artifacts(status=active)
+  -> ModelService validates and loads
+  -> prediction_logs keep exact model_artifact_id
+```
+
+Croston, conservative, and simple-average methods remain deterministic
+statistical/rule-based methods. They carry method versions in prediction logs
+but do not get fake model artifact rows.
+
+## 12. Evidence-Based Routing
+
+Routing remains demand-pattern aware. `ModelRoutingService` decides; the
+adaptive forecasting service executes.
+
+```text
+Demand History
+  -> Pattern Classifier
+  -> Eligible Methods
+  -> ModelRoutingService
+       -> insufficient evidence: default policy
+       -> sufficient evidence: metric comparison
+  -> Selected Method
+  -> AdaptiveForecastingService
+  -> Forecast
+  -> Prediction Log
+  -> Forecast Evaluation
+  -> Future routing evidence
+```
+
+Default policy is unchanged:
+
+- `regular -> ml_lightgbm`, with existing `simple_average` fallback if the
+  artifact/features are unavailable.
+- `intermittent -> croston`.
+- `highly_intermittent -> conservative`.
+
+Eligible methods are intentionally narrow. Regular SKUs may compare
+`ml_lightgbm`, `croston`, and logged `simple_average` evidence. Intermittent
+SKUs may compare `croston` and logged `simple_average` evidence.
+Highly-intermittent SKUs keep `conservative` until there is real evidence for a
+safe alternative.
+
+Evidence hierarchy:
+
+1. SKU-level logged evaluations.
+2. Demand-pattern logged evaluations.
+3. SKU-level offline benchmark evidence.
+4. Demand-pattern offline benchmark evidence.
+5. Default routing.
+
+The primary routing metric is WAPE. Evidence must be recent, horizon-matching,
+sample-size sufficient, and materially better than the default method. Ties and
+small improvements keep the default method to avoid method flapping.

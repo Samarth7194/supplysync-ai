@@ -3,9 +3,10 @@
 import logging
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Tuple, Optional
+from typing import Any, Dict, List, Tuple, Optional
 from forecasting.forecast_service import forecast_next_days
 from features.inference_features import build_inference_features
+from services.model_routing_service import RoutingDecision, ModelRoutingService
 
 logger = logging.getLogger(__name__)
 
@@ -81,6 +82,21 @@ def conservative_forecast(
     avg = float(recent.mean()) if len(recent) > 0 else 0.0
     return [avg * buffer] * horizon
 
+
+def simple_average_forecast(demand_series: pd.Series, horizon: int) -> List[float]:
+    return [float(demand_series.tail(7).mean())] * horizon
+
+
+def _result(
+    forecast: List[float],
+    method: str,
+    routing_decision: RoutingDecision,
+    include_routing: bool,
+) -> Any:
+    if include_routing:
+        return forecast, method, routing_decision.as_dict()
+    return forecast, method
+
 def adaptive_forecast(
     sku: str,
     demand_series: pd.Series,
@@ -88,7 +104,10 @@ def adaptive_forecast(
     model=None,
     last_features: Optional[pd.DataFrame] = None,
     feature_columns: Optional[List[str]] = None,
-) -> Tuple[List[float], str]:
+    routing_service: ModelRoutingService | None = None,
+    routing_as_of_date=None,
+    include_routing: bool = False,
+) -> Tuple[List[float], str] | Tuple[List[float], str, dict[str, Any]]:
     """
     Adaptive forecasting based on SKU demand pattern.
 
@@ -107,8 +126,39 @@ def adaptive_forecast(
     """
 
     demand_pattern = classify_sku_demand_pattern(demand_series)
+    if routing_service is not None:
+        routing_decision = routing_service.select_method(
+            sku_code=sku,
+            demand_pattern=demand_pattern,
+            forecast_horizon=horizon,
+            as_of_date=routing_as_of_date,
+        )
+    else:
+        default_method = ModelRoutingService.default_method_for_pattern(demand_pattern)
+        routing_decision = RoutingDecision(
+            selected_method=default_method,
+            default_method=default_method,
+            selection_source="default",
+            evidence_level="default",
+            reason="Legacy demand-pattern routing used; no routing service was provided.",
+            fallback_used=True,
+        )
 
-    if demand_pattern == "regular":
+    selected_method = routing_decision.selected_method
+
+    if selected_method == "croston":
+        logger.info("SKU %s: %s demand -> croston", sku, demand_pattern)
+        return _result(croston_forecast(demand_series, horizon), "croston", routing_decision, include_routing)
+
+    if selected_method == "conservative":
+        logger.info("SKU %s: %s demand -> conservative", sku, demand_pattern)
+        return _result(conservative_forecast(demand_series, horizon), "conservative", routing_decision, include_routing)
+
+    if selected_method == "simple_average":
+        logger.info("SKU %s: %s demand -> simple_average", sku, demand_pattern)
+        return _result(simple_average_forecast(demand_series, horizon), "simple_average", routing_decision, include_routing)
+
+    if selected_method == "ml_lightgbm":
         features_df = last_features
         build_failure_reason = None
 
@@ -126,10 +176,11 @@ def adaptive_forecast(
             try:
                 forecast = forecast_next_days(model, features_df, horizon)
                 logger.info(
-                    "SKU %s: regular demand -> trained LightGBM model (ml_lightgbm)",
+                    "SKU %s: %s demand -> trained LightGBM model (ml_lightgbm)",
                     sku,
+                    demand_pattern,
                 )
-                return forecast, "ml_lightgbm"
+                return _result(forecast, "ml_lightgbm", routing_decision, include_routing)
             except Exception as exc:
                 logger.warning(
                     "Model inference failed for SKU %s: %s; falling back to simple_average",
@@ -146,18 +197,16 @@ def adaptive_forecast(
             fallback_reason = "model_inference_error"
 
         logger.info(
-            "SKU %s: regular demand -> simple_average fallback (reason=%s)",
-            sku, fallback_reason,
+            "SKU %s: %s demand -> simple_average fallback (reason=%s)",
+            sku,
+            demand_pattern,
+            fallback_reason,
         )
-        forecast = [float(demand_series.tail(7).mean())] * horizon
-        return forecast, "simple_average"
+        return _result(simple_average_forecast(demand_series, horizon), "simple_average", routing_decision, include_routing)
 
-    if demand_pattern == "intermittent":
-        logger.info("SKU %s: intermittent demand -> croston", sku)
-        return croston_forecast(demand_series, horizon), "croston"
-
-    logger.info("SKU %s: highly_intermittent demand -> conservative", sku)
-    return conservative_forecast(demand_series, horizon), "conservative"
+    logger.info("SKU %s: invalid routing method %s -> legacy conservative fallback", sku, selected_method)
+    fallback = conservative_forecast(demand_series, horizon)
+    return _result(fallback, "conservative", routing_decision, include_routing)
 
 def get_sku_classification_metadata(demand_series: pd.Series) -> Dict:
     """

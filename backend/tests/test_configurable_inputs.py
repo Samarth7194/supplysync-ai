@@ -1,9 +1,6 @@
-"""Tests for the configurable analyze inputs (lead_time_days, service_level).
+"""Tests for configurable analyze inputs."""
 
-Locks the contract that the API accepts per-request overrides, validates
-their bounds, and actually routes them through to the decision math so the
-reorder point changes.
-"""
+from __future__ import annotations
 
 import sys
 from pathlib import Path
@@ -11,6 +8,9 @@ from pathlib import Path
 import pandas as pd
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
+from sqlalchemy.pool import StaticPool
 
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
@@ -34,48 +34,102 @@ def _regular_series(length=45, level=20.0):
     return pd.Series([level + (i % 5) for i in range(length)], index=dates, dtype=float)
 
 
-def test_analyze_defaults_are_backward_compatible():
-    import main as backend_main
-    from storage.analysis_store import AnalysisStore
+def _session():
+    from db.models import Base
 
-    with TestClient(backend_main.app) as c:
-        backend_main._analysis_store = AnalysisStore(":memory:")
-        backend_main._data_service = _StubDataService({"HAS": _regular_series()})
-        body = c.post("/api/analyze", json={"sku": "HAS", "current_stock": 10}).json()
+    engine = create_engine(
+        "sqlite+pysqlite:///:memory:",
+        connect_args={"check_same_thread": False},
+        poolclass=StaticPool,
+        future=True,
+    )
+    Base.metadata.create_all(engine)
+    Session = sessionmaker(bind=engine, expire_on_commit=False, future=True)
+    return Session()
+
+
+def _client(data_service):
+    import main as backend_main
+    from repositories.analysis_repository import AnalysisRepository
+    from services.analysis_service import AnalysisService
+    from services.intelligent_inventory_service import IntelligentInventoryService
+
+    session = _session()
+    backend_main._data_service = data_service
+    backend_main._inventory_service = IntelligentInventoryService(model=None, model_feature_columns=None)
+
+    def override_analysis_service():
+        return AnalysisService(
+            inventory_service=backend_main._inventory_service,
+            settings=backend_main.SETTINGS,
+            data_service=backend_main._data_service,
+            analysis_repository=AnalysisRepository(session),
+            model_loaded=False,
+            model_dir=backend_main.SETTINGS.forecasting.model_path,
+        )
+
+    backend_main.app.dependency_overrides[backend_main.get_analysis_service] = override_analysis_service
+    return backend_main, TestClient(backend_main.app)
+
+
+def _cleanup(backend_main):
+    backend_main.app.dependency_overrides.clear()
+
+
+def test_analyze_defaults_are_backward_compatible():
+    backend_main, client = _client(_StubDataService({"HAS": _regular_series()}))
+    try:
+        body = client.post("/api/analyze", json={"sku": "HAS", "current_stock": 10}).json()
+    finally:
+        client.close()
+        _cleanup(backend_main)
+
     assert body["decision"]["lead_time_days"] == 7
     assert body["decision"]["service_level"] == pytest.approx(0.95)
 
 
-def test_lead_time_override_flows_into_decision(tmp_path):
-    import main as backend_main
-    from storage.analysis_store import AnalysisStore
+def test_lead_time_override_flows_into_decision():
+    backend_main, client = _client(_StubDataService({"HAS": _regular_series()}))
+    try:
+        week = client.post(
+            "/api/analyze",
+            json={"sku": "HAS", "current_stock": 10, "lead_time_days": 7},
+        ).json()
+        month = client.post(
+            "/api/analyze",
+            json={"sku": "HAS", "current_stock": 10, "lead_time_days": 21},
+        ).json()
+    finally:
+        client.close()
+        _cleanup(backend_main)
 
-    with TestClient(backend_main.app) as c:
-        backend_main._analysis_store = AnalysisStore(tmp_path / "db.sqlite")
-        backend_main._data_service = _StubDataService({"HAS": _regular_series()})
-        week = c.post("/api/analyze",
-                      json={"sku": "HAS", "current_stock": 10, "lead_time_days": 7}).json()
-        month = c.post("/api/analyze",
-                       json={"sku": "HAS", "current_stock": 10, "lead_time_days": 21}).json()
-    # A longer horizon should sum more forecast days → larger lead-time demand.
     assert month["decision"]["lead_time_days"] == 21
     assert month["decision"]["lead_time_demand"] > week["decision"]["lead_time_demand"]
+    assert len(week["forecast"]["daily"]) == 7
+    assert len(week["forecast"]["full_horizon_daily"]) == 7
+    assert week["forecast"]["horizon_days"] == 7
+    assert len(month["forecast"]["daily"]) == 7
+    assert len(month["forecast"]["full_horizon_daily"]) == 21
+    assert month["forecast"]["horizon_days"] == 21
+    assert "constraints" in month["decision"]
 
 
-def test_service_level_override_increases_safety_stock(tmp_path):
-    import main as backend_main
-    from storage.analysis_store import AnalysisStore
+def test_service_level_override_increases_safety_stock():
+    backend_main, client = _client(_StubDataService({"HAS": _regular_series()}))
+    try:
+        low = client.post(
+            "/api/analyze",
+            json={"sku": "HAS", "current_stock": 10, "service_level": 0.80},
+        ).json()
+        high = client.post(
+            "/api/analyze",
+            json={"sku": "HAS", "current_stock": 10, "service_level": 0.99},
+        ).json()
+    finally:
+        client.close()
+        _cleanup(backend_main)
 
-    with TestClient(backend_main.app) as c:
-        backend_main._analysis_store = AnalysisStore(tmp_path / "db.sqlite")
-        backend_main._data_service = _StubDataService({"HAS": _regular_series()})
-        low = c.post("/api/analyze",
-                     json={"sku": "HAS", "current_stock": 10, "service_level": 0.80}).json()
-        high = c.post("/api/analyze",
-                      json={"sku": "HAS", "current_stock": 10, "service_level": 0.99}).json()
     assert high["decision"]["service_level"] == pytest.approx(0.99)
-    # Higher service level demands a larger buffer (traditional formula is
-    # monotonic in Z-score).
     assert high["decision"]["safety_stock"] >= low["decision"]["safety_stock"]
 
 
@@ -91,7 +145,7 @@ def test_service_level_override_increases_safety_stock(tmp_path):
 def test_bad_inputs_rejected_with_422(payload):
     import main as backend_main
 
-    with TestClient(backend_main.app) as c:
+    with TestClient(backend_main.app) as client:
         backend_main._data_service = _StubDataService({"HAS": _regular_series()})
-        r = c.post("/api/analyze", json=payload)
-        assert r.status_code == 422
+        response = client.post("/api/analyze", json=payload)
+        assert response.status_code == 422

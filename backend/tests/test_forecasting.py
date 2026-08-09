@@ -10,17 +10,15 @@ from services.adaptive_forecasting_service import (
     adaptive_forecast,
 )
 from services.intelligent_inventory_service import IntelligentInventoryService
+from services.model_routing_service import RoutingDecision
 from features.inference_features import (
     build_inference_features,
     MIN_HISTORY_FOR_INFERENCE,
 )
+from features.schema import FEATURE_COLUMNS
 
 
-TRAIN_FEATURE_COLUMNS = [
-    "lag_1", "lag_2", "lag_3", "lag_4", "lag_5", "lag_6", "lag_7",
-    "rolling_mean_7", "rolling_std_7", "rolling_mean_14",
-    "day_of_week", "month", "is_weekend", "day_of_month", "week_of_year",
-]
+TRAIN_FEATURE_COLUMNS = FEATURE_COLUMNS
 
 
 class _StubModel:
@@ -37,6 +35,28 @@ class _StubModel:
     def predict(self, features):
         self.calls.append(features)
         return np.array([self.constant])
+
+
+class _RoutingService:
+    def __init__(self, selected_method: str, default_method: str = "ml_lightgbm"):
+        self.selected_method = selected_method
+        self.default_method = default_method
+
+    def select_method(self, **kwargs):
+        return RoutingDecision(
+            selected_method=self.selected_method,
+            default_method=self.default_method,
+            selection_source="logged",
+            evidence_level="pattern",
+            reason=f"unit-test selected {self.selected_method}",
+            metric_name="wape",
+            selected_metric_value=0.7,
+            baseline_metric_value=1.0,
+            evaluation_sample_size=30,
+            evaluation_count=3,
+            evidence_age_days=1,
+            fallback_used=False,
+        )
 
 
 # --- SKU Classification Tests ---
@@ -231,6 +251,28 @@ def test_intelligent_service_intermittent_still_uses_croston():
     )
     assert decision["intelligence"]["forecast_method"] == "croston"
     assert not model.calls, "model should not be called on intermittent SKUs"
+
+
+def test_intelligent_service_executes_router_selected_method():
+    model = _StubModel(constant=20.0)
+    service = IntelligentInventoryService(
+        model=model,
+        model_feature_columns=TRAIN_FEATURE_COLUMNS,
+    )
+    series = _regular_series(length=30, seed=3)
+
+    decision = service.get_intelligent_reorder_decision(
+        sku="TEST-ROUTE",
+        current_stock=50,
+        demand_history=series,
+        lead_time_days=7,
+        routing_service=_RoutingService("croston"),
+    )
+
+    assert decision["intelligence"]["forecast_method"] == "croston"
+    assert decision["intelligence"]["routing"]["selected_method"] == "croston"
+    assert decision["intelligence"]["routing"]["default_method"] == "ml_lightgbm"
+    assert not model.calls, "model should not run when routing selected Croston"
 
 
 def test_intelligent_service_does_not_crash_on_short_history():

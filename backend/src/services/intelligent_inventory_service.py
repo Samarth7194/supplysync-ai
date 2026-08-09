@@ -53,7 +53,8 @@ class IntelligentInventoryService:
         last_features: Optional[pd.DataFrame] = None,
         forecast_history: Optional[pd.Series] = None,
         risk_appetite: str = "moderate",
-        supplier_constraints: Optional[SupplierConstraints] = None
+        supplier_constraints: Optional[SupplierConstraints] = None,
+        routing_service=None,
     ) -> Dict:
         """
         Get comprehensive reorder decision with adaptive forecasting, dynamic safety stock, uncertainty awareness, and business constraints.
@@ -80,13 +81,15 @@ class IntelligentInventoryService:
         # 2. Adaptive forecasting (feature schema flows through so the trained
         # model can drive inference even when the caller didn't pre-compute
         # ``last_features``).
-        forecast, forecast_method = adaptive_forecast(
+        forecast, forecast_method, routing = adaptive_forecast(
             sku=sku,
             demand_series=demand_history,
             horizon=lead_time_days,
             model=self.model,
             last_features=last_features,
             feature_columns=self.model_feature_columns,
+            routing_service=routing_service,
+            include_routing=True,
         )
         
         # 3. Compute prediction intervals if forecast history available
@@ -172,6 +175,7 @@ class IntelligentInventoryService:
             "intelligence": {
                 "demand_pattern": demand_pattern,
                 "forecast_method": forecast_method,
+                "routing": routing,
                 "sku_metadata": sku_metadata,
                 "adaptive_logic": {
                     "regular_skus": "Use ML LightGBM forecast",

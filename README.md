@@ -4,7 +4,7 @@
 
 Built on the [UCI Online Retail II](https://archive.ics.uci.edu/dataset/502/online+retail+ii) dataset (~1M transactions, ~4,900 SKUs).
 
-**Docs:** [architecture](docs/architecture.md) · [API reference](docs/api.md) · [demo walkthrough](docs/demo.md)
+**Docs:** [guided tour](docs/PROJECT_GUIDED_TOUR.md) � [project explained](docs/PROJECT_EXPLAINED.md) � [architecture](docs/architecture.md) � [API reference](docs/api.md)
 
 ---
 
@@ -18,7 +18,7 @@ make backend       # shell 1: http://localhost:8000
 make frontend      # shell 2: http://localhost:3000
 ```
 
-That's it — open `http://localhost:3000` and follow [`docs/demo.md`](docs/demo.md). The system runs with auth off by default so the dashboard opens immediately; flip to demo-auth with `AUTH_MODE=demo` + `DEMO_PASSWORD=…` when you want the login gate.
+That's it: open `http://localhost:3000` and follow the demo script in [`docs/PROJECT_EXPLAINED.md`](docs/PROJECT_EXPLAINED.md). The system runs with auth off by default so the dashboard opens immediately; flip to demo-auth with `AUTH_MODE=demo` + `DEMO_PASSWORD=...` when you want the login gate.
 
 ---
 
@@ -29,11 +29,11 @@ That's it — open `http://localhost:3000` and follow [`docs/demo.md`](docs/demo
 | | |
 |---|---|
 | ![Dashboard](docs/screenshots/01-dashboard.png) | ![SKU detail — ML path](docs/screenshots/02-sku-ml-path.png) |
-| **Dashboard** — KPI cards, per-SKU recommendations with provenance badges, row-level risk colour bars, SQLite-persisted activity panel. | **SKU detail (ML path)** — regular-demand SKU, LightGBM forecast, explanation trio, historical chart with P50/P90 overlays. |
+| **Dashboard** — KPI cards, per-SKU recommendations with provenance badges, row-level risk colour bars, SQLAlchemy-persisted activity panel. | **SKU detail (ML path)** — regular-demand SKU, LightGBM forecast, explanation trio, historical chart with demand-reference overlays. |
 | ![SKU detail — synthetic path](docs/screenshots/03-sku-synthetic-path.png) | ![Sliders drive the recommendation](docs/screenshots/04-sliders-rerun.png) |
 | **Unknown-SKU fallback** — amber synthetic-data banner, statistical method, provenance preserved end-to-end. | **Live assumption sliders** — lead-time and service-level changes re-run `/api/analyze` and update the decision in-place. |
 | ![User-editable stock input](docs/screenshots/05-stock-override.png) | |
-| **User-editable current stock** — type real inventory, the analysis re-runs, the "Stored locally" pill replaces the demo label, and the value persists per-SKU in your browser. | |
+| **User-editable current stock** — type real inventory, the analysis re-runs, and the value is saved through the backend stock API with a browser fallback only for degraded/offline states. | |
 
 ---
 
@@ -66,9 +66,11 @@ The project is deliberately scoped as a **portfolio-grade demo**: it runs on a s
 ## Key Features
 
 - **Adaptive forecasting** — one pipeline, three methods, picked per SKU based on demand sparsity. Regular → LightGBM; intermittent → Croston SBA; highly intermittent → conservative buffer.
+- **Evidence-based routing with safe defaults** — when matching evaluation evidence is sufficient, recent, horizon-compatible, and materially better, the router can choose a stronger existing method; otherwise it keeps the demand-pattern default.
 - **Trained LightGBM model drives live inference** — the API builds a training-shaped feature row from the latest history at request time and feeds it through the trained model; it does not silently degrade to an average.
+- **Reproducible model identity** — the LightGBM artifact has an explicit version, SHA-256 checksum, feature-schema version, lifecycle status, and prediction-log linkage through `model_artifacts`.
 - **Explicit provenance** — every `/api/analyze` response includes `demand_source` (`historical | request | synthetic`) and `forecast_source` (`model_forecast | statistical_method | rule_based_estimate | unavailable`). The UI renders matching badges on every surface.
-- **User-editable current stock** — type real stock into any SKU, watch the recommendation and risk band change, values persist per-SKU in browser localStorage. Honestly labeled: "Stored locally" vs. "Demo value".
+- **User-editable current stock** — type real stock into any SKU, watch the recommendation and risk band change, and persist values through server-side stock endpoints with a browser fallback for degraded/offline states.
 - **Configurable assumptions** — lead time (1–30 d) and service level (51–99%) sliders on the SKU detail page re-run `/api/analyze` in place.
 - **Bring-your-own-data (CLI)** — run training, evaluation, and baselines on any retail CSV via `DATA_CSV_PATH` + optional column mapping. See [`docs/bring-your-own-data.md`](docs/bring-your-own-data.md).
 - **Cross-SKU generalization eval** — `scripts/evaluate_cross_sku.py` holds out SKUs the model never saw and reports LightGBM vs. baseline performance fold-by-fold. The honest answer to "does it generalize?"
@@ -251,7 +253,7 @@ All `/api/*` routes accept an optional `X-API-Key` header. If the `API_KEY` env 
 | GET | `/api/skus/details` | Top-20 SKUs with avg/total demand |
 | GET | `/api/skus/{sku}/history?days=30` | Recorded daily demand for a SKU, or `available: false` if the SKU isn't in the processed dataset |
 | POST | `/api/analyze` | Risk + reorder recommendation for a SKU, with provenance, decision, and explanation blocks |
-| GET | `/api/analyses/recent?limit=N` | Most-recent persisted analyses (local/demo SQLite store) |
+| GET | `/api/analyses/recent?limit=N` | Most-recent persisted analyses from SQLAlchemy `analysis_runs` |
 | GET | `/api/auth/status` | Public auth-mode probe (used by the frontend gate) |
 | POST | `/api/auth/login` | Demo-mode login: `{username, password}` → session cookie |
 | POST | `/api/auth/logout` | Clears the session cookie |
@@ -409,6 +411,15 @@ python scripts/compute_kpis.py       # inventory backtest → cached_kpis.json
 python scripts/evaluate_forecast.py  # model vs. baselines → forecast_evaluation.{json,csv}
 ```
 
+Model artifacts are generated as candidates, not silently promoted. To register
+and promote a validated artifact:
+
+```bash
+python scripts/register_model_artifact.py --model-name lightgbm_demand_forecast
+python scripts/promote_model.py --artifact-id <id>
+python scripts/promote_model.py --artifact-id <id> --force
+```
+
 Once running, `curl http://localhost:8000/health` reports which artifacts are loaded:
 
 ```json
@@ -453,6 +464,11 @@ The compose file bind-mounts `./backend` at `/app` and the dataset at `/data` (r
 | Variable | Default | Purpose |
 |---|---|---|
 | `MODEL_PATH` | `backend/saved_models` | Where `ModelService` loads/saves artifacts |
+| `EVIDENCE_ROUTING_ENABLED` | `false` | Enable evidence-based method selection. Disabled by default until logged evidence matures. |
+| `ROUTING_PRIMARY_METRIC` | `wape` | Primary lower-is-better routing metric. Avoids naive MAPE on sparse demand. |
+| `ROUTING_MIN_EVALUATION_POINTS` | `30` | Minimum evaluated points required before evidence can affect routing. |
+| `ROUTING_MIN_RELATIVE_IMPROVEMENT` | `0.05` | Required relative error improvement before switching away from the default method. |
+| `ROUTING_EVIDENCE_LOOKBACK_DAYS` | `365` | Ignore evaluation evidence older than this window. |
 | `LEAD_TIME_DAYS` | `7` | Default lead time (analyze can override per request) |
 | `SERVICE_LEVEL` | `0.95` | Default service level (analyze can override per request) |
 | `AUTH_MODE` | `off` | `off` (open API) or `demo` (session-cookie login required) |
@@ -461,7 +477,7 @@ The compose file bind-mounts `./backend` at `/app` and the dataset at `/data` (r
 | `API_KEY` | *(unset)* | Legacy header auth — honored in either mode when set |
 | `ALLOWED_ORIGINS` | `http://localhost:3000` | Comma-separated CORS origins |
 | `LOG_LEVEL` / `LOG_JSON` | `INFO` / `false` | Logging configuration parsed by the backend settings layer |
-| `ANALYSES_DB_PATH` | `backend/data/analyses.sqlite` | Local/demo persistence file |
+| `DATABASE_URL` | `sqlite:///backend/data/supplysync.db` | SQLAlchemy database URL. Docker/production should use PostgreSQL. |
 
 Backend runtime settings are composed in `backend/src/config/settings.py`, with
 domain-specific modules for app, auth, database, forecasting, inventory, and
@@ -531,11 +547,12 @@ Split explicitly so nothing is oversold:
 | Surface | What's real | What's demo |
 |---|---|---|
 | **Forecasting** | LightGBM + Croston + moving-average fallback fully implemented; invoked on every `/api/analyze` call; fallbacks are labeled, never hidden. | Trained on top-20 SKUs only. |
+| **Model lifecycle** | LightGBM artifact metadata includes checksum, version, feature schema, and lifecycle status; prediction logs keep the exact `model_artifact_id` used. | Promotion is command-line/manual, not a full model registry platform. |
 | **Evaluation** | MAE / RMSE / WAPE / MASE correctly computed vs. four baselines on a temporal holdout. Cross-SKU script reports the unseen-SKU story honestly (even if baselines win). | Evaluation baseline set is fixed (naive / seasonal / MA / Croston); no bigger models compared. |
 | **Inventory math** | Z-score safety stock, reorder point, MOQ + order-multiple + max-order constraints, dynamic sigma from rolling residuals. Same math on every request. | — |
-| **Current stock** | User can type real stock per SKU; re-runs the analysis; persists locally. | Default values are demo (derived from avg demand × `[0.3, 0.8, 2.0]`). Persistence is browser-local, not a server-side inventory table. |
+| **Current stock** | User can type real stock per SKU; re-runs the analysis; persists through backend stock endpoints. | Default values are demo-derived until a real stock update exists. Browser storage remains only as a degraded/offline fallback. |
 | **Auth** | HMAC-signed session cookie, configurable demo password. | Demo-mode only — no OAuth, no multi-tenant, no proper RBAC. |
-| **Persistence** | `POST /api/analyze` writes every decision to SQLite; the Recent analyses panel reads back from it. | SQLite file is local-only, no backups, no concurrency guarantees. |
+| **Persistence** | `POST /api/analyze` writes every decision and linked prediction log through SQLAlchemy repositories; the Recent analyses panel reads `analysis_runs`. Docker/CI exercise PostgreSQL migrations. | Local default remains SQLite for lightweight development unless `DATABASE_URL` points at PostgreSQL. |
 | **Data ingestion** | Bring-your-own-CSV with column-mapping config for real retail feeds. | No live inventory integration, no ERP connectors. |
 
 ---
@@ -544,19 +561,19 @@ Split explicitly so nothing is oversold:
 
 This is a **portfolio-grade demo**, not a production ERP. Things that are honest to know up-front:
 
-- **Stock realism is local-demo-grade.** The current-stock input is real and interactive, but the override is stored in your browser's localStorage, not on a server. A production build would back it with a proper inventory table (see Future Improvements).
+- **Stock persistence is mid-migration.** The current-stock input is real and interactive, and edited values now go through server-side stock endpoints. The frontend still keeps a browser fallback for offline/error states while the PostgreSQL migration matures.
 - **Only 20 SKUs in training.** The full UCI dataset has ~4,900 SKUs; we train on the top-20 by total demand to keep the demo fast. Cross-SKU evaluation covers generalization across that set but doesn't extrapolate to cold-start products.
 - **Headline metrics are dataset-specific.** The 37.8% cost reduction / 95.7% fill rate come from simulating policies on UCI Online Retail II's top-10 SKUs. Expect different numbers on your data — that's why the cross-SKU and custom-dataset evaluation paths exist.
 - **The trained model and processed parquet aren't committed** (only the metadata JSON is). Run `python scripts/bootstrap.py` once after cloning to generate both. Until they exist, the regular-demand path falls back to `simple_average` with `forecast_source="rule_based_estimate"`, `/api/skus*` return 503 with a `hint`, and `/health` reports `model_loaded: false` / `data_available: false`.
 - **Model accuracy is modest.** The trained LightGBM reports MAE ≈ 95 units on the held-out 30-day split — credible for a demo trained on public retail data, not state-of-the-art. Classical baselines (Croston, moving-average) beat it on intermittent SKUs; the live router handles that routing automatically.
 - **Scope is intentional.** Single product family (general retail), no background job scheduler, no multi-tenant isolation, no KPI drill-downs, no backorder or multi-sourcing logic.
-- **Frontend demo signals are deliberate.** The "Demo value" pill, "Stored locally" pill, and amber "synthetic demo" banner exist so a viewer can never mistake illustrative values for real operational data.
+- **Frontend demo signals are deliberate.** The "Demo value" pill, server/offline stock-source labels, and amber "synthetic demo" banner exist so a viewer can never mistake illustrative values for real operational data.
 
 ---
 
 ## Future Improvements
 
-- Server-side inventory store to replace the browser-localStorage stock persistence — a proper `stock_levels` table with history, backed by an `/api/stock/{sku}` write endpoint.
+- Run PostgreSQL as the normal development path, keep migrations validated in CI, and decide whether old local SQLite analysis snapshots need a one-time import.
 - UI upload flow for bring-your-own-data (currently CLI-only).
 - Probabilistic forecasting (quantile regression or conformal intervals) end-to-end, replacing the current residual-based approximation.
 - Per-SKU model selection via cross-validated AIC/MAPE rather than a sparsity threshold.
@@ -584,3 +601,91 @@ It's meant to be honest about what it is — a small, well-scoped, well-labeled 
 ## License
 
 MIT
+
+## Architecture Update: Analysis Service
+
+`POST /api/analyze` now delegates orchestration to
+`backend/src/services/analysis_service.py`. The FastAPI route keeps the same
+request and response contract, while `AnalysisService` owns demand resolution,
+synthetic fallback, inventory-service orchestration, deterministic
+explanations, SQLAlchemy-first analysis persistence, and linked prediction-log
+creation.
+
+Recent analysis history reads SQLAlchemy `analysis_runs`. Stock persistence is server-side through the existing `StockService` and `StockRepository` path, with the frontend retaining a browser fallback only for degraded demo use.
+
+## Logged Prediction Evaluation
+
+SupplySync now separates two kinds of forecast evidence:
+
+- offline model benchmarking, generated by scripts such as
+  `backend/scripts/evaluate_forecast.py`;
+- logged prediction evaluation, generated after persisted `/api/analyze`
+  forecasts have a completed actual-demand window.
+
+The logged workflow is:
+
+```text
+analysis_runs
+  -> prediction_logs
+  -> actual demand from DataService
+  -> forecast_evaluations
+```
+
+Run it with:
+
+```bash
+cd backend
+python scripts/evaluate_logged_predictions.py
+```
+
+The evaluator skips predictions whose horizon has not completed, predictions
+without available recorded actuals, and predictions that already have an
+evaluation row.
+
+## Evidence-Based Routing
+
+Forecast routing is now evidence-aware but still conservative:
+
+```text
+demand history
+  -> demand pattern
+  -> eligible existing methods
+  -> matching evaluation evidence
+  -> safe default unless the evidence is strong enough
+```
+
+The primary metric is WAPE. Evidence must match the demand pattern and forecast
+horizon, meet `ROUTING_MIN_EVALUATION_POINTS`, be within
+`ROUTING_EVIDENCE_LOOKBACK_DAYS`, and beat the default method by at least
+`ROUTING_MIN_RELATIVE_IMPROVEMENT`.
+
+Logged SQLAlchemy evaluations are preferred. Offline benchmark evidence from
+`backend/data/forecast_evaluation.json` is used only as bootstrap evidence when
+the horizon matches. The committed offline artifact is a 30-day evaluation, so
+it does not silently change the default 7-day `/api/analyze` behavior.
+
+Preview the policy against the offline artifact with:
+
+```bash
+cd backend
+python scripts/simulate_model_routing.py
+```
+
+## Model Artifact Lifecycle
+
+SupplySync treats the LightGBM file as a versioned artifact, not just a generic
+pickle. `backend/saved_models/lightgbm_demand_forecast_metadata.json` records
+the model version, SHA-256 checksum, feature-schema version/checksum, training
+summary, and lifecycle status.
+
+At startup, `ModelService` validates the artifact path, checksum, model type,
+feature schema version, and ordered feature columns. If validation fails, the
+API keeps running and regular-demand SKUs use the existing `simple_average`
+fallback instead of executing an incompatible model.
+
+The database table `model_artifacts` is the lifecycle source of truth after an
+artifact is registered. Historical `prediction_logs` keep their original
+`model_artifact_id`, `model_version`, and `feature_schema_version`, even if a
+new artifact is promoted later.
+
+

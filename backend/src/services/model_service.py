@@ -1,13 +1,22 @@
-# src/services/model_service.py
+"""Model artifact loading, metadata, and integrity checks."""
 
-import pickle
-import pandas as pd
-import numpy as np
-from typing import Dict, Any, Optional
-from pathlib import Path
-import logging
-from datetime import datetime, timezone
+from __future__ import annotations
+
+import hashlib
 import json
+import logging
+import pickle
+from datetime import datetime, timezone
+from pathlib import Path
+from typing import Any, Dict, Optional
+
+import pandas as pd
+
+from features.schema import FEATURE_COLUMNS, FEATURE_SCHEMA_VERSION, feature_schema_checksum
+
+
+class ModelArtifactValidationError(Exception):
+    """Raised when an artifact exists but should not be used for inference."""
 
 class ModelService:
     """
@@ -41,6 +50,28 @@ class ModelService:
             logger.addHandler(handler)
         
         return logger
+
+    @staticmethod
+    def checksum_file(path: Path | str) -> str:
+        """Compute a SHA-256 checksum for a model artifact."""
+        digest = hashlib.sha256()
+        with Path(path).open("rb") as fh:
+            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
+                digest.update(chunk)
+        return digest.hexdigest()
+
+    @staticmethod
+    def version_from_checksum(model_name: str, saved_at: str, checksum: str) -> str:
+        """Return a deterministic model version from timestamp + checksum."""
+        stamp = saved_at.replace("+00:00", "Z").replace("-", "").replace(":", "")
+        return f"{model_name}-{stamp}-{checksum[:12]}"
+
+    def metadata_path(self, model_name: str) -> Path:
+        return self.model_dir / f"{model_name}_metadata.json"
+
+    def artifact_path(self, model_name: str, metadata: Optional[Dict[str, Any]] = None) -> Path:
+        artifact_file = (metadata or {}).get("artifact_file") or f"{model_name}.pkl"
+        return self.model_dir / str(artifact_file)
     
     def save_model(self, model: Any, model_name: str, metadata: Optional[Dict] = None) -> str:
         """
@@ -55,7 +86,7 @@ class ModelService:
         - Path to saved model
         """
         
-        model_path = self.model_dir / f"{model_name}.pkl"
+        model_path = self.artifact_path(model_name)
 
         # Save model
         with open(model_path, 'wb') as f:
@@ -68,13 +99,27 @@ class ModelService:
         # Store only the filename in the portable metadata so the committed
         # JSON doesn't leak the original developer's absolute filesystem
         # path. The loader resolves the file via ``model_dir``.
-        metadata.update({
-            "saved_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
-            "model_name": model_name,
-            "artifact_file": model_path.name,
-        })
+        saved_at = metadata.get("saved_at") or datetime.now(timezone.utc).isoformat(timespec="seconds")
+        checksum = self.checksum_file(model_path)
+        feature_columns = list(metadata.get("features") or FEATURE_COLUMNS)
+        metadata.update(
+            {
+                "saved_at": saved_at,
+                "model_name": model_name,
+                "model_family": "lightgbm" if "lightgbm" in model_name else model_name,
+                "model_type": "ml",
+                "artifact_file": model_path.name,
+                "artifact_checksum": checksum,
+                "checksum_algorithm": "sha256",
+                "version": metadata.get("version") or self.version_from_checksum(model_name, saved_at, checksum),
+                "feature_schema_version": metadata.get("feature_schema_version") or FEATURE_SCHEMA_VERSION,
+                "feature_schema_checksum": metadata.get("feature_schema_checksum")
+                or feature_schema_checksum(feature_columns),
+                "lifecycle_status": metadata.get("lifecycle_status") or "candidate",
+            }
+        )
         
-        metadata_path = self.model_dir / f"{model_name}_metadata.json"
+        metadata_path = self.metadata_path(model_name)
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
         
@@ -103,11 +148,9 @@ class ModelService:
             self.logger.info(f"Model loaded from cache: {model_name}")
             return self._model_cache[model_name]
         
-        # Load from disk
-        model_path = self.model_dir / f"{model_name}.pkl"
-        
-        if not model_path.exists():
-            raise FileNotFoundError(f"Model not found: {model_path}")
+        # Load from disk only after validating metadata and checksum.
+        metadata = self.validate_model_artifact(model_name)
+        model_path = self.artifact_path(model_name, metadata)
         
         with open(model_path, 'rb') as f:
             model = pickle.load(f)
@@ -116,12 +159,7 @@ class ModelService:
         if use_cache:
             self._model_cache[model_name] = model
         
-        # Load metadata
-        metadata_path = self.model_dir / f"{model_name}_metadata.json"
-        if metadata_path.exists():
-            with open(metadata_path, 'r') as f:
-                metadata = json.load(f)
-            self._model_metadata[model_name] = metadata
+        self._model_metadata[model_name] = metadata
         
         self.logger.info(f"Model loaded from disk: {model_name}")
         
@@ -142,7 +180,7 @@ class ModelService:
             return self._model_metadata[model_name]
         
         # Load from disk
-        metadata_path = self.model_dir / f"{model_name}_metadata.json"
+        metadata_path = self.metadata_path(model_name)
         if metadata_path.exists():
             with open(metadata_path, 'r') as f:
                 metadata = json.load(f)
@@ -150,6 +188,62 @@ class ModelService:
             return metadata
         
         return {}
+
+    def validate_model_artifact(self, model_name: str) -> Dict[str, Any]:
+        """Validate artifact presence, checksum, and feature compatibility."""
+        metadata = self.get_model_metadata(model_name)
+        if not metadata:
+            raise ModelArtifactValidationError(f"Model metadata not found for {model_name}")
+
+        model_type = metadata.get("model_type", "ml")
+        if model_type != "ml":
+            raise ModelArtifactValidationError(f"Unsupported model_type for artifact loading: {model_type}")
+
+        artifact_path = self.artifact_path(model_name, metadata)
+        if not artifact_path.exists():
+            raise FileNotFoundError(f"Model not found: {artifact_path}")
+
+        expected_checksum = metadata.get("artifact_checksum")
+        if expected_checksum:
+            actual_checksum = self.checksum_file(artifact_path)
+            if actual_checksum != expected_checksum:
+                raise ModelArtifactValidationError(
+                    f"Checksum mismatch for {model_name}: expected {expected_checksum}, got {actual_checksum}"
+                )
+
+        feature_version = metadata.get("feature_schema_version")
+        if feature_version and feature_version != FEATURE_SCHEMA_VERSION:
+            raise ModelArtifactValidationError(
+                f"Feature schema mismatch for {model_name}: artifact={feature_version}, runtime={FEATURE_SCHEMA_VERSION}"
+            )
+
+        features = metadata.get("features")
+        if features and list(features) != FEATURE_COLUMNS:
+            raise ModelArtifactValidationError("Artifact feature column order does not match runtime schema")
+        expected_feature_checksum = metadata.get("feature_schema_checksum")
+        if expected_feature_checksum and expected_feature_checksum != feature_schema_checksum(FEATURE_COLUMNS):
+            raise ModelArtifactValidationError("Artifact feature schema checksum does not match runtime schema")
+
+        return metadata
+
+    def artifact_status(self, model_name: str) -> Dict[str, Any]:
+        """Return credential/path-safe model artifact status for health/model-info."""
+        try:
+            metadata = self.validate_model_artifact(model_name)
+            return {
+                "valid": True,
+                "model_name": model_name,
+                "version": metadata.get("version"),
+                "feature_schema_version": metadata.get("feature_schema_version"),
+                "lifecycle_status": metadata.get("lifecycle_status"),
+                "checksum": metadata.get("artifact_checksum"),
+            }
+        except Exception as exc:  # noqa: BLE001 - status should be diagnostic, not fatal
+            return {
+                "valid": False,
+                "model_name": model_name,
+                "error": type(exc).__name__,
+            }
     
     def cache_features(self, sku: str, features: pd.DataFrame, cache_name: str = "latest") -> None:
         """
@@ -198,10 +292,13 @@ class ModelService:
         if model_name:
             if model_name in self._model_cache:
                 del self._model_cache[model_name]
+            if model_name in self._model_metadata:
+                del self._model_metadata[model_name]
                 self.logger.info(f"Cleared cache for model: {model_name}")
         else:
             self._model_cache.clear()
             self._feature_cache.clear()
+            self._model_metadata.clear()
             self.logger.info("Cleared all caches")
     
     def list_available_models(self) -> list:
@@ -322,7 +419,7 @@ def get_model_service(model_dir: str = "backend/saved_models") -> ModelService:
     
     global _model_service
     
-    if _model_service is None:
+    if _model_service is None or Path(model_dir) != _model_service.model_dir:
         _model_service = ModelService(model_dir)
     
     return _model_service

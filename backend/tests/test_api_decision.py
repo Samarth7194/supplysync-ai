@@ -51,7 +51,7 @@ def test_analyze_returns_decision_block_with_all_fields():
             "lead_time_days", "lead_time_demand",
             "safety_stock", "safety_stock_method",
             "reorder_point", "service_level",
-            "inventory_gap", "why",
+            "inventory_gap", "why", "constraints",
         }
         assert set(d.keys()) == expected_keys
 

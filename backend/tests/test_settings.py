@@ -13,7 +13,6 @@ def test_settings_defaults(monkeypatch):
 
     for name in (
         "MODEL_PATH",
-        "ANALYSES_DB_PATH",
         "DATABASE_URL",
         "ALLOWED_ORIGINS",
         "LEAD_TIME_DAYS",
@@ -22,13 +21,22 @@ def test_settings_defaults(monkeypatch):
         "STOCKOUT_COST",
         "LOG_LEVEL",
         "LOG_JSON",
+        "EVIDENCE_ROUTING_ENABLED",
+        "ROUTING_PRIMARY_METRIC",
+        "ROUTING_MIN_EVALUATION_POINTS",
+        "ROUTING_MIN_RELATIVE_IMPROVEMENT",
+        "ROUTING_EVIDENCE_LOOKBACK_DAYS",
     ):
         monkeypatch.delenv(name, raising=False)
 
     settings = load_settings()
 
     assert settings.forecasting.model_path == str(BACKEND_DIR / "saved_models")
-    assert settings.database.analyses_db_path == str(BACKEND_DIR / "data" / "analyses.sqlite")
+    assert settings.forecasting.evidence_routing_enabled is False
+    assert settings.forecasting.routing_primary_metric == "wape"
+    assert settings.forecasting.routing_min_evaluation_points == 30
+    assert settings.forecasting.routing_min_relative_improvement == 0.05
+    assert settings.forecasting.routing_evidence_lookback_days == 365
     assert settings.database.database_url == f"sqlite:///{(BACKEND_DIR / 'data' / 'supplysync.db').as_posix()}"
     assert settings.app.allowed_origins == ["http://localhost:3000"]
     assert settings.inventory.default_lead_time_days == 7
@@ -43,9 +51,7 @@ def test_settings_parse_env_overrides(monkeypatch, tmp_path):
     from config.settings import load_settings
 
     model_dir = tmp_path / "models"
-    db_path = tmp_path / "analyses.sqlite"
     monkeypatch.setenv("MODEL_PATH", str(model_dir))
-    monkeypatch.setenv("ANALYSES_DB_PATH", str(db_path))
     monkeypatch.setenv("DATABASE_URL", "postgresql+psycopg2://supplysync:supplysync@localhost:5432/supplysync")
     monkeypatch.setenv("ALLOWED_ORIGINS", "http://localhost:3000, https://demo.example.com")
     monkeypatch.setenv("LEAD_TIME_DAYS", "14")
@@ -54,11 +60,15 @@ def test_settings_parse_env_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("STOCKOUT_COST", "5")
     monkeypatch.setenv("LOG_LEVEL", "debug")
     monkeypatch.setenv("LOG_JSON", "true")
+    monkeypatch.setenv("EVIDENCE_ROUTING_ENABLED", "false")
+    monkeypatch.setenv("ROUTING_PRIMARY_METRIC", "mase")
+    monkeypatch.setenv("ROUTING_MIN_EVALUATION_POINTS", "50")
+    monkeypatch.setenv("ROUTING_MIN_RELATIVE_IMPROVEMENT", "0.15")
+    monkeypatch.setenv("ROUTING_EVIDENCE_LOOKBACK_DAYS", "90")
 
     settings = load_settings()
 
     assert settings.forecasting.model_path == str(model_dir)
-    assert settings.database.analyses_db_path == str(db_path)
     assert settings.database.database_url == "postgresql+psycopg2://supplysync:supplysync@localhost:5432/supplysync"
     assert settings.app.allowed_origins == ["http://localhost:3000", "https://demo.example.com"]
     assert settings.inventory.default_lead_time_days == 14
@@ -67,18 +77,21 @@ def test_settings_parse_env_overrides(monkeypatch, tmp_path):
     assert settings.inventory.stockout_cost_per_unit == 5.0
     assert settings.logging.level == "DEBUG"
     assert settings.logging.json_logs is True
+    assert settings.forecasting.evidence_routing_enabled is False
+    assert settings.forecasting.routing_primary_metric == "mase"
+    assert settings.forecasting.routing_min_evaluation_points == 50
+    assert settings.forecasting.routing_min_relative_improvement == 0.15
+    assert settings.forecasting.routing_evidence_lookback_days == 90
 
 
 def test_settings_resolve_repo_root_style_backend_paths(monkeypatch):
     from config.settings import PROJECT_ROOT, load_settings
 
     monkeypatch.setenv("MODEL_PATH", "backend/saved_models")
-    monkeypatch.setenv("ANALYSES_DB_PATH", "backend/data/analyses.sqlite")
 
     settings = load_settings()
 
     assert Path(settings.forecasting.model_path) == PROJECT_ROOT / "backend" / "saved_models"
-    assert Path(settings.database.analyses_db_path) == PROJECT_ROOT / "backend" / "data" / "analyses.sqlite"
 
 
 def test_settings_invalid_numbers_fail_fast(monkeypatch):
@@ -108,4 +121,24 @@ def test_settings_invalid_logging_values_fail_fast(monkeypatch):
     monkeypatch.setenv("LOG_LEVEL", "LOUD")
 
     with pytest.raises(ValueError, match="LOG_LEVEL must be one of"):
+        load_settings()
+
+
+def test_settings_invalid_routing_metric_fails_fast(monkeypatch):
+    import pytest
+    from config.settings import load_settings
+
+    monkeypatch.setenv("ROUTING_PRIMARY_METRIC", "mape")
+
+    with pytest.raises(ValueError, match="ROUTING_PRIMARY_METRIC"):
+        load_settings()
+
+
+def test_settings_invalid_routing_threshold_fails_fast(monkeypatch):
+    import pytest
+    from config.settings import load_settings
+
+    monkeypatch.setenv("ROUTING_MIN_RELATIVE_IMPROVEMENT", "2")
+
+    with pytest.raises(ValueError, match="ROUTING_MIN_RELATIVE_IMPROVEMENT"):
         load_settings()

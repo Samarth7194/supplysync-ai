@@ -34,17 +34,12 @@ from lightgbm import LGBMRegressor  # noqa: E402
 
 from ingestion.load_retail_data import load_sku_demand  # noqa: E402
 from features.lag_features import create_lag_features  # noqa: E402
+from features.schema import FEATURE_COLUMNS  # noqa: E402
 from features.time_features import create_time_features  # noqa: E402
 from services.adaptive_forecasting_service import classify_sku_demand_pattern  # noqa: E402
 from evaluation import baselines  # noqa: E402
 from evaluation.metrics import compute_all  # noqa: E402
 
-
-FEATURE_COLUMNS = [
-    "lag_1", "lag_2", "lag_3", "lag_4", "lag_5", "lag_6", "lag_7",
-    "rolling_mean_7", "rolling_std_7", "rolling_mean_14",
-    "day_of_week", "month", "is_weekend", "day_of_month", "week_of_year",
-]
 
 HORIZON = 30
 MIN_HISTORY_DAYS = 60

@@ -34,14 +34,8 @@ from ingestion.load_retail_data import (
 )
 from features.lag_features import create_lag_features
 from features.time_features import create_time_features
+from features.schema import FEATURE_COLUMNS, FEATURE_SCHEMA_VERSION, feature_schema_checksum
 from services.model_service import get_model_service, ModelService
-
-
-FEATURE_COLUMNS = [
-    "lag_1", "lag_2", "lag_3", "lag_4", "lag_5", "lag_6", "lag_7",
-    "rolling_mean_7", "rolling_std_7", "rolling_mean_14",
-    "day_of_week", "month", "is_weekend", "day_of_month", "week_of_year",
-]
 
 
 def prepare_sku_features(sku_df: pd.DataFrame) -> pd.DataFrame:
@@ -52,7 +46,7 @@ def prepare_sku_features(sku_df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def train(csv_path=None, column_mapping=None, parquet_path=None):
+def train(csv_path=None, column_mapping=None, parquet_path=None, register_candidate=False):
     print("=" * 60)
     print("SupplySync AI - Model Training Pipeline")
     print("=" * 60)
@@ -153,8 +147,10 @@ def train(csv_path=None, column_mapping=None, parquet_path=None):
     elif os.environ.get("DATA_CSV_PATH"):
         dataset_label = Path(os.environ["DATA_CSV_PATH"]).name
 
-    model_service.save_model(model, "lightgbm_demand_forecast", metadata={
+    metadata = {
         "features": FEATURE_COLUMNS,
+        "feature_schema_version": FEATURE_SCHEMA_VERSION,
+        "feature_schema_checksum": feature_schema_checksum(FEATURE_COLUMNS),
         "train_skus": top_skus,
         "n_train_rows": len(train_df),
         "n_test_rows": len(test_df),
@@ -162,7 +158,36 @@ def train(csv_path=None, column_mapping=None, parquet_path=None):
         "rmse": round(rmse, 2),
         "mape": round(mape, 1),
         "dataset": dataset_label,
-    })
+        "training_data": {
+            "row_count": int(len(daily_df)),
+            "sku_count": int(daily_df["StockCode"].nunique()),
+            "date_start": str(daily_df["date"].min().date()) if "date" in daily_df else None,
+            "date_end": str(daily_df["date"].max().date()) if "date" in daily_df else None,
+        },
+        "training_config": {
+            "objective": "regression",
+            "metric": "mae",
+            "num_leaves": 31,
+            "learning_rate": 0.05,
+            "n_estimators": 200,
+            "min_child_samples": 10,
+            "subsample": 0.8,
+            "colsample_bytree": 0.8,
+        },
+    }
+    model_service.save_model(model, "lightgbm_demand_forecast", metadata=metadata)
+
+    if register_candidate:
+        from db.session import SessionLocal
+        from repositories.model_artifact_repository import ModelArtifactRepository
+
+        with SessionLocal() as session:
+            artifact = ModelArtifactRepository(session).register_metadata(
+                model_service.get_model_metadata("lightgbm_demand_forecast"),
+                status="candidate",
+            )
+            session.commit()
+        print(f"  Registered candidate model artifact id={artifact.id} version={artifact.version}")
 
     # Cache last features for each SKU
     for sku, features in sku_last_features.items():
@@ -194,6 +219,11 @@ def _parse_args():
         default=None,
         help="Override output parquet path. Defaults to DATA_PARQUET_PATH env var, then data/processed/daily_demand.parquet.",
     )
+    parser.add_argument(
+        "--register-candidate",
+        action="store_true",
+        help="Register the saved artifact in model_artifacts with candidate lifecycle status.",
+    )
     return parser.parse_args()
 
 
@@ -203,4 +233,9 @@ if __name__ == "__main__":
     if args.column_mapping:
         with open(args.column_mapping) as fh:
             mapping = json.load(fh)
-    train(csv_path=args.csv, column_mapping=mapping, parquet_path=args.parquet)
+    train(
+        csv_path=args.csv,
+        column_mapping=mapping,
+        parquet_path=args.parquet,
+        register_candidate=args.register_candidate,
+    )

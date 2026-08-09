@@ -23,7 +23,6 @@ backend/
 │   ├── inventory/              # Safety stock, reorder point, order-qty constraints
 │   ├── services/               # AdaptiveForecastingService (the method router)
 │   ├── simulation/             # Day-by-day naive-vs-intelligent policy comparison
-│   ├── storage/                # SQLite analysis store
 │   └── uncertainty/            # Rolling forecast error → dynamic safety stock
 ├── scripts/
 │   ├── check_setup.py          # Prints [OK] / [MISSING] per required artifact
@@ -70,7 +69,17 @@ cd backend
 python scripts/train_model.py
 ```
 
-Writes `saved_models/lightgbm_demand_forecast.pkl` + `_metadata.json`. The live API picks up the new artifact on next startup.
+Writes `saved_models/lightgbm_demand_forecast.pkl` + `_metadata.json`. The
+metadata includes version, SHA-256 checksum, feature-schema version, training
+data summary, and lifecycle status. The live API validates those fields on
+startup before loading the artifact.
+
+Register and promote are explicit:
+
+```bash
+python scripts/register_model_artifact.py --model-name lightgbm_demand_forecast
+python scripts/promote_model.py --artifact-id <id>
+```
 
 To train on a **different dataset**, set `DATA_CSV_PATH`:
 
@@ -119,7 +128,7 @@ shell. Key ones:
 - `MODEL_PATH` — where ModelService loads/saves the LightGBM artifact.
 - `AUTH_MODE` — `off` (default) or `demo` (adds an HMAC session cookie gate).
 - `ALLOWED_ORIGINS` — comma-separated CORS origins.
-- `ANALYSES_DB_PATH` — SQLite file for the persistent analysis log.
+- `DATABASE_URL` — SQLAlchemy database URL. Docker/production should use PostgreSQL.
 - `DATA_CSV_PATH` / `DATA_PARQUET_PATH` — override the default UCI paths for bring-your-own-data workflows.
 
 ---
@@ -129,15 +138,16 @@ shell. Key ones:
 - **Routes** → [`main.py`](./main.py). Every endpoint is in one file by design — fast to scan.
 - **Method routing** (regular → LightGBM, intermittent → Croston, highly intermittent → conservative buffer) → [`src/services/adaptive_forecasting_service.py`](./src/services/adaptive_forecasting_service.py).
 - **Reorder math** → [`src/inventory/`](./src/inventory/).
-- **How the API response is assembled** (risk, decision block, explanation, model_info) → the `POST /api/analyze` handler in `main.py`.
-- **Persistence** → [`src/storage/analysis_store.py`](./src/storage/analysis_store.py).
+- **How the API response is assembled** (risk, decision block, explanation, model_info) → [`src/services/analysis_service.py`](./src/services/analysis_service.py).
+- **Persistence** → [`src/repositories/analysis_repository.py`](./src/repositories/analysis_repository.py), [`src/repositories/stock_repository.py`](./src/repositories/stock_repository.py), and [`src/db/session.py`](./src/db/session.py).
 
 ---
 
 ## Database migration foundation
 
-The production database layer has been scaffolded but is not route-wired yet.
-The active runtime persistence path is still `src/storage/analysis_store.py`.
+The production database layer is now route-wired for stock, analysis history,
+and prediction logging. Runtime persistence uses SQLAlchemy sessions,
+repositories, and Alembic-managed tables.
 
 - `DATABASE_URL` is the SQLAlchemy URL for the target PostgreSQL-backed persistence layer.
 - `src/db/session.py` builds SQLAlchemy engines and sessions from `DATABASE_URL`.
@@ -152,8 +162,9 @@ Run migrations from `backend/`:
 python -m alembic upgrade head
 ```
 
-Route handlers should continue to avoid direct SQLAlchemy calls. Future steps
-should inject repositories into services, then migrate endpoints incrementally.
+Route handlers should continue to avoid direct SQLAlchemy calls. They receive
+services through dependencies; services depend on repositories; repositories
+own SQLAlchemy details.
 
 ---
 
@@ -162,4 +173,6 @@ should inject repositories into services, then migrate endpoints incrementally.
 - **Honest fallbacks.** If the LightGBM artifact isn't loadable or the feature row can't be built, the API falls back to a 7-day moving average and labels `forecast_source` as `rule_based_estimate` — it never silently degrades.
 - **Deterministic synthetic data.** Unknown SKUs get a Poisson(20)×30 series seeded on the SKU string, labeled `demand_source: "synthetic"`. No hidden randomness between calls.
 - **No LLM in the response path.** Explanations are template-generated from the decision block — every sentence is traceable to a number the system already computed.
-- **Best-effort persistence.** A SQLite write failure never breaks the API response.
+- **Persistence is required for analysis auditability.** If SQLAlchemy
+  persistence is unavailable, analysis history endpoints return 503 instead of
+  silently falling back to an untracked local store.

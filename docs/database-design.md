@@ -1,14 +1,16 @@
 # Database Design
 
-This document defines the target persistence model for SupplySync AI before
-introducing SQLAlchemy, Alembic, or PostgreSQL code.
+This document defines the target persistence model for SupplySync AI and tracks
+the incremental migration from demo-local state toward SQLAlchemy/PostgreSQL
+persistence.
 
-The current repository has two persistence paths:
+The current repository is mid-migration:
 
-- `/api/analyze` snapshots are stored in a local SQLite table through
-  `backend/src/storage/analysis_store.py`.
-- editable stock levels are stored in browser `localStorage` through
-  `frontend/lib/stock.ts`.
+- `/api/analyze` delegates to `AnalysisService` and writes SQLAlchemy
+  `analysis_runs` and `prediction_logs`.
+- editable stock levels use server-side stock endpoints backed by SQLAlchemy
+  repositories, with browser storage retained only as a degraded/offline
+  fallback.
 
 That is useful for a demo, but it is not enough for a production inventory
 decision system. The target database must store inventory state, inventory
@@ -257,6 +259,7 @@ later compare predicted demand to actual observed demand.
 | `routing_reason` | `text` | nullable | Why this model/method was selected. |
 | `model_name` | `varchar(128)` | nullable | `lightgbm_demand_forecast`, `croston_sba`, etc. |
 | `model_version` | `varchar(128)` | nullable | Artifact version/hash/timestamp. |
+| `feature_schema_version` | `varchar(64)` | nullable | Runtime feature schema used by ML artifacts. |
 | `model_artifact_id` | `bigint` | foreign key to `model_artifacts.id`, nullable | Populated for trained artifacts. |
 | `input_history_length` | `integer` | not null, check `>= 0` | Number of demand observations used. |
 | `forecast_horizon_days` | `integer` | not null, check `> 0` | Number of future days predicted. |
@@ -347,23 +350,34 @@ logs reproducible.
 |---|---|---|---|
 | `id` | `bigserial` | primary key | Artifact id. |
 | `model_name` | `varchar(128)` | not null | `lightgbm_demand_forecast`, `croston_sba`, etc. |
+| `model_family` | `varchar(64)` | nullable | `lightgbm` for the shared tree model. |
 | `model_type` | `varchar(64)` | not null | `ml`, `statistical_method`, `rule_based_fallback`. |
 | `version` | `varchar(128)` | not null | Timestamp, semantic version, or artifact hash. |
+| `artifact_checksum` | `varchar(64)` | nullable, unique | SHA-256 artifact identity. |
+| `checksum_algorithm` | `varchar(16)` | nullable | Currently `sha256`. |
 | `artifact_uri` | `text` | nullable | Local path, object-store URI, or null for pure statistical methods. |
 | `metadata_uri` | `text` | nullable | Path to metadata JSON, if separate. |
 | `feature_schema` | `jsonb` | nullable | Ordered feature names for ML artifacts. |
+| `feature_schema_version` | `varchar(64)` | nullable | Runtime-compatible feature schema version. |
+| `feature_schema_checksum` | `varchar(64)` | nullable | Hash of ordered feature schema metadata. |
 | `training_dataset` | `text` | nullable | Dataset identifier. |
 | `training_started_at` | `timestamptz` | nullable | Training start. |
 | `training_finished_at` | `timestamptz` | nullable | Training end. |
 | `training_metrics` | `jsonb` | nullable | Training MAE/RMSE and future metrics. |
+| `training_metadata` | `jsonb` | nullable | Training rows, test rows, train SKUs, config, and data summary. |
+| `lifecycle_status` | `varchar(32)` | not null, default `candidate` | `candidate`, `active`, `retired`, or `failed`. |
 | `is_active` | `boolean` | not null, default `false` | Runtime default candidate. |
+| `activated_at` | `timestamptz` | nullable | Promotion timestamp. |
+| `retired_at` | `timestamptz` | nullable | Retirement timestamp. |
 | `created_at` | `timestamptz` | not null, default `now()` | Insert timestamp. |
 
 Indexes:
 
 - `uq_model_artifacts_name_version` on `(model_name, version)`
+- `uq_model_artifacts_artifact_checksum` on `artifact_checksum`
 - `idx_model_artifacts_active` on `(model_name, is_active)`
 - `idx_model_artifacts_type` on `model_type`
+- `idx_model_artifacts_lifecycle_status` on `lifecycle_status`
 
 Main queries:
 
@@ -375,6 +389,13 @@ Relationships:
 
 - One model artifact has many forecast evaluations.
 - One model artifact can be referenced by many prediction logs.
+
+Lifecycle rules:
+
+- Training produces a candidate artifact.
+- Promotion is explicit through `scripts/promote_model.py`.
+- Promotion retires previous active artifacts in the same transaction.
+- Retired artifacts remain referenced by historical prediction logs.
 
 ## Main Runtime Queries
 
@@ -478,53 +499,19 @@ order by target_end_date asc;
 
 Serves future monitoring/backfill jobs.
 
-## Migration Plan
+## Runtime Persistence Status
 
-### Phase 1: Design only
+The schema is implemented with SQLAlchemy models and Alembic migrations. The FastAPI runtime uses repositories instead of direct ORM calls inside route handlers.
 
-- Add this document.
-- Do not add SQLAlchemy, Alembic, or PostgreSQL dependencies yet.
+Current persistence paths:
 
-### Phase 2: ORM foundation
+- `POST /api/analyze` writes `analysis_runs` and linked `prediction_logs` rows when the configured database is migrated and reachable.
+- `GET /api/analyses/recent` reads recent SQLAlchemy `analysis_runs` rows.
+- `GET /api/stock`, `GET /api/stock/{sku_id}`, and `PUT /api/stock/{sku_id}` use `StockService` and `StockRepository`.
+- Forecast evaluation evidence is stored in `forecast_evaluations` and can be used by routing services when trustworthy evidence exists.
+- Model metadata and lifecycle fields are represented in `model_artifacts`.
 
-- Add SQLAlchemy, Alembic, and PostgreSQL driver dependencies.
-- Create `src/db/session.py` for engine/session construction.
-- Create `src/db/models.py` for table mappings.
-- Create repositories for analysis and stock persistence.
-- Keep `main.py` free of direct SQLAlchemy calls.
-
-### Phase 3: Analysis persistence migration
-
-- Implement `AnalysisRepository`.
-- Preserve `GET /api/analyses/recent` response shape.
-- Write to `analysis_runs` instead of the old SQLite `analyses` table.
-- Keep the current `AnalysisStore` available only as a compatibility fallback
-  until the new repository is tested.
-
-### Phase 4: Server-side stock
-
-- Implement `StockRepository`.
-- Add `GET /api/stock`, `GET /api/stock/{sku_id}`, and
-  `PUT /api/stock/{sku_id}`.
-- Update the frontend to use the backend stock API.
-- Keep a short-lived localStorage fallback only for offline/error states if
-  needed, clearly labeled as degraded mode.
-
-### Phase 5: Prediction logging
-
-- Write a `prediction_logs` row for every `/api/analyze` call.
-- Include model name, model version, demand source, forecast method, input
-  history length, horizon, p50, p90, daily forecast, and recommended quantity.
-- Leave `actual_observed_demand` nullable for later backfills.
-
-### Phase 6: Evidence-based routing
-
-- Import `forecast_evaluation.json` into `forecast_evaluations`.
-- Prefer per-SKU evaluation winners when available.
-- Fall back to demand-class winners.
-- Fall back to threshold routing only when no evaluation evidence exists.
-- Add `routing_reason` to the analyze response without removing existing fields.
-
+The frontend still has a browser fallback for stock values so the demo remains usable if the stock API is temporarily unavailable. That fallback is intentionally labeled as degraded demo behavior.
 ## Transaction Boundaries
 
 `PUT /api/stock/{sku_id}`:

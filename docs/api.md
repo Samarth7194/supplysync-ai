@@ -30,7 +30,7 @@ All examples below omit auth; add the cookie or `X-API-Key` header when `AUTH_MO
 | PUT  | `/api/stock/{sku_id}`          | Append a server-side stock snapshot for one SKU |
 | GET  | `/api/skus/{sku}/history?days=30` | Recorded daily demand for a SKU |
 | POST | `/api/analyze`                 | Risk + reorder recommendation for a single SKU |
-| GET  | `/api/analyses/recent?limit=N`    | Most-recent persisted analyses (SQLite, local/demo store) |
+| GET  | `/api/analyses/recent?limit=N`    | Most-recent persisted analyses from SQLAlchemy `analysis_runs` |
 
 ---
 
@@ -65,6 +65,10 @@ curl http://localhost:8000/api/model-info
   "model_name": "lightgbm_demand_forecast",
   "model_type": "ml",
   "artifact_available": true,
+  "model_version": "lightgbm_demand_forecast-20260523T084002Z-ea7815fa9a33",
+  "feature_schema_version": "demand_lag_calendar_v1",
+  "artifact_valid": true,
+  "lifecycle_status": "candidate",
   "trained_at": "2026-04-21T13:35:21+00:00",
   "dataset": "online_retail_II.csv",
   "feature_count": 15,
@@ -238,10 +242,12 @@ curl -X POST http://localhost:8000/api/analyze \
   "forecast": {
     "p50": 85.2,
     "p90": 268.1,
-    "daily": [79.1, 82.5, 88.0, 84.3, 91.2, 85.9, 82.7]
+    "daily": [79.1, 82.5, 88.0, 84.3, 91.2, 85.9, 82.7],
+    "full_horizon_daily": [79.1, 82.5, 88.0, 84.3, 91.2, 85.9, 82.7],
+    "horizon_days": 7
   },
   "current_stock": 50,
-  "recommended_order": 512,
+  "recommended_order": 740,
   "action": "PURCHASE",
   "demand_pattern": "regular",
   "forecast_method": "ml_lightgbm",
@@ -255,7 +261,20 @@ curl -X POST http://localhost:8000/api/analyze \
     "reorder_point": 788.0,
     "service_level": 0.95,
     "inventory_gap": 738.0,
-    "why": "Projected demand over the 7-day lead time is 593.7 units. With a 194.3-unit safety buffer (targeting 95% service level) the reorder point is 788.0. Current stock 50.0 is below that, so ordering 512 units brings the position back above the reorder point."
+    "constraints": {
+      "raw_order_quantity": 738,
+      "final_order_quantity": 740,
+      "moq": 10,
+      "order_multiple": 5,
+      "max_order_quantity": 1000,
+      "constraints_applied": ["Rounded to multiple of 5"],
+      "moq_applied": false,
+      "order_multiple_applied": true,
+      "max_order_cap_applied": false,
+      "constrained": true,
+      "remaining_gap_after_order": 0.0
+    },
+    "why": "Projected demand over the 7-day lead time is 593.7 units. With a 194.3-unit safety buffer (targeting 95% service level) the reorder point is 788.0. Current stock 50.0 is below that, so ordering 740 units brings the position back above the reorder point."
   },
   "model_info": {
     "model_name": "lightgbm_demand_forecast",
@@ -282,8 +301,8 @@ curl -X POST http://localhost:8000/api/analyze \
 
 | Block | What it tells you |
 |---|---|
-| `forecast` | P50 / P90 of the demand series used for risk classification, plus the recursive 7-day forecast. |
-| `decision` | Every number that goes into the reorder computation: lead-time demand, safety stock and its method, reorder point, inventory gap, and a plain-English `why`. |
+| `forecast` | Historical demand summary values used for risk classification, the legacy 7-value `daily` series, and `full_horizon_daily` for the requested lead-time horizon. |
+| `decision` | Every number that goes into the reorder computation: lead-time demand, safety stock and its method, reorder point, inventory gap, business-constraint metadata, and a plain-English `why`. |
 | `model_info` | Which path produced this response: trained ML, statistical method, or rule-based fallback. Honest about whether the `.pkl` is actually loaded. |
 | `explanation` | Four short, deterministic strings (no LLM): *classification_reason*, *method_reason*, *risk_reason*, *confidence_note*. Useful for dashboards that want to show "why" without composing copy themselves. |
 | `demand_source` | Where the input demand came from: `historical`, `request`, or `synthetic`. |
@@ -314,7 +333,7 @@ curl "http://localhost:8000/api/analyses/recent?limit=3"
 ```json
 {
   "available": true,
-  "source": "sqlite (local/demo persistence)",
+  "source": "sqlalchemy",
   "total": 73,
   "items": [
     {
@@ -324,7 +343,7 @@ curl "http://localhost:8000/api/analyses/recent?limit=3"
       "risk": "HIGH",
       "action": "PURCHASE",
       "current_stock": 50.0,
-      "recommended_order": 512,
+      "recommended_order": 740,
       "demand_pattern": "regular",
       "forecast_method": "ml_lightgbm",
       "demand_source": "historical",
@@ -343,12 +362,14 @@ curl "http://localhost:8000/api/analyses/recent?limit=3"
 }
 ```
 
-Backed by a SQLite file at `backend/data/analyses.sqlite` (override with `ANALYSES_DB_PATH`). `limit` is clamped to `[1, 200]`. This is deliberately a local/demo persistence layer — see [docs/architecture.md](./architecture.md) for the full flow.
+Backed by SQLAlchemy `analysis_runs` and linked `prediction_logs`. `limit` is
+clamped to `[1, 200]`. Local development can still use the default SQLite
+`DATABASE_URL`, while Docker/CI/production should use PostgreSQL.
 
-When no store is configured (e.g. the lifespan couldn't create the file):
+When the database is unavailable or migrations have not been applied:
 
 ```json
-{ "available": false, "items": [], "total": 0 }
+{ "detail": "Analysis history persistence is unavailable." }
 ```
 
 ---
@@ -425,3 +446,34 @@ All error payloads follow FastAPI's default `{ "detail": "<string>" }` shape. Th
 - [docs/architecture.md](./architecture.md) — data flow + decision pipeline.
 - [backend/scripts/evaluate_forecast.py](../backend/scripts/evaluate_forecast.py) — reproduce the `evaluation.summary` numbers the API surfaces.
 - [backend/tests/](../backend/tests) — 75 pytest cases covering every endpoint's contract.
+
+## Analysis Persistence Note
+
+`POST /api/analyze` now persists through the application service layer. When
+the SQLAlchemy database is migrated, each successful analysis writes:
+
+```text
+analysis_runs
+  -> prediction_logs
+```
+
+`GET /api/analyses/recent` reads SQLAlchemy `analysis_runs`. There is no
+secondary SQLite fallback in the FastAPI runtime.
+
+Logged prediction evaluation is not part of request handling. Run
+`python backend/scripts/evaluate_logged_predictions.py` to evaluate due
+`prediction_logs` rows against recorded actual demand and persist
+`forecast_evaluations` rows. This does not change the `/api/analyze` response
+contract.
+
+## Evidence Routing Note
+
+`POST /api/analyze` remains backward compatible. The response fields are not
+renamed or removed. Internally, `ModelRoutingService` may select among existing
+forecasting methods when trustworthy evaluation evidence is available. The
+selected executed method still appears in `forecast_method`, and the provenance
+category still appears in `forecast_source`.
+
+Routing provenance is persisted to `analysis_runs.routing_reason` and
+`prediction_logs.routing_reason` when SQLAlchemy persistence is available.
+

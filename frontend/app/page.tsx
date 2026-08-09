@@ -32,7 +32,7 @@ import {
 import { EmptyState } from "@/components/EmptyState";
 import { SectionHeader } from "@/components/SectionHeader";
 import { env } from "@/lib/env";
-import { formatRelativeTime } from "@/lib/utils";
+import { formatDemandPattern, formatForecastMethod, formatRelativeTime } from "@/lib/utils";
 import { ChevronRight, Pencil } from "lucide-react";
 import { getStockForSku, setStockForSku, getStockOrigin } from "@/lib/stock";
 
@@ -59,7 +59,7 @@ function PatternBadge({ pattern }: { pattern: string }) {
     intermittent: "text-purple-400",
     highly_intermittent: "text-orange-400",
   };
-  return <span className={`text-xs ${colors[pattern] || "text-gray-400"}`}>{pattern}</span>;
+  return <span className={`text-xs ${colors[pattern] || "text-gray-400"}`}>{formatDemandPattern(pattern)}</span>;
 }
 
 function SkeletonRow({ index }: { index: number }) {
@@ -165,7 +165,7 @@ export default function Dashboard() {
   // Inline stock editing — null when nothing is being edited, otherwise the
   // SKU id and the draft string.
   const [editingStock, setEditingStock] = useState<{ sku: string; draft: string } | null>(null);
-  const [stockVersion, setStockVersion] = useState(0); // force re-render when localStorage changes
+  const [stockVersion, setStockVersion] = useState(0); // force re-render after fallback stock edits
 
   useEffect(() => {
     const controller = new AbortController();
@@ -394,12 +394,9 @@ export default function Dashboard() {
         <section>
           <SectionHeader
             eyebrow="Performance"
-            title="Simulation KPIs"
+            title="Backtest Performance"
             subtitle={
-              <>
-                Results from the policy backtest in <code className="px-1 py-0.5 rounded bg-gray-800 text-gray-300 text-[11px]">scripts/compute_kpis.py</code>. Hover
-                a card for the exact metric definition.
-              </>
+              "Results from the project backtest. Hover over each metric for its definition."
             }
           />
           {kpisUnavailable && !kpis && null}
@@ -407,19 +404,7 @@ export default function Dashboard() {
         {kpisUnavailable && !kpis && (
           <EmptyState
             title="KPIs not yet computed"
-            hint={
-              <>
-                The simulation KPIs haven&apos;t been generated on this deployment. Run{" "}
-                <code className="px-1 py-0.5 rounded bg-gray-800 text-gray-300 text-[11px]">
-                  python scripts/compute_kpis.py
-                </code>
-                {" "}(or{" "}
-                <code className="px-1 py-0.5 rounded bg-gray-800 text-gray-300 text-[11px]">
-                  scripts/bootstrap.py
-                </code>
-                ) in the backend to produce them.
-              </>
-            }
+            hint="The backtest metrics have not been generated on this deployment. Run the backend setup scripts to produce them."
             tone="warning"
           />
         )}
@@ -458,7 +443,7 @@ export default function Dashboard() {
             icon={Cpu}
             value="LightGBM"
             label="Forecast Model"
-            sublabel="trained on real sales; see README for MAE/WAPE vs baselines"
+            sublabel="Trained on the UCI Online Retail II dataset."
             color="bg-orange-600"
             tooltip="LightGBM with lag and calendar features. See README 'Forecast Evaluation' for per-class metrics against naive, seasonal-naive, moving-avg-7, and Croston baselines."
           />
@@ -525,7 +510,7 @@ export default function Dashboard() {
                       Stock
                       <span
                         className="text-[9px] font-semibold px-1.5 py-0.5 rounded bg-amber-500/10 text-amber-300 border border-amber-500/30"
-                        title="Default stock levels are demo values derived from SKU average demand. Click any cell to enter a real value — overrides persist locally in your browser."
+                        title="Stock values use demo defaults until updated. Saved values are stored on the server when available."
                       >
                         EDITABLE
                       </span>
@@ -543,7 +528,7 @@ export default function Dashboard() {
                   : filteredSkus.map((sku) => {
                       const a = analyses[sku.id];
                       const demo = computeDemoStock(sku.avg_demand, skuDetails.indexOf(sku));
-                      // stockVersion is read to force re-render after localStorage edits.
+                      // stockVersion is read to force re-render after fallback edits.
                       void stockVersion;
                       const server = serverStock[sku.id];
                       const stock = server?.quantity_on_hand ?? getStockForSku(sku.id, demo);
@@ -602,7 +587,7 @@ export default function Dashboard() {
                                   className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-200 tabular-nums hover:text-white cursor-text"
                                   title={
                                     origin === "user"
-                                      ? "Stored locally in your browser. Click to edit."
+                                      ? "Saved as a local demo fallback. Click to edit."
                                       : origin === "server"
                                         ? "Stored by the backend stock API. Click to edit."
                                       : "Demo value. Click to override with real stock."
@@ -625,7 +610,7 @@ export default function Dashboard() {
                             <td className="px-4 py-3.5">
                               {a ? (
                                 <span className="inline-flex items-center gap-2 flex-wrap">
-                                  <span className="text-xs text-gray-400">{a.forecast_method}</span>
+                                  <span className="text-xs text-gray-400">{formatForecastMethod(a.forecast_method)}</span>
                                   <DataSourceBadge kind={forecastSourceKind(a.forecast_source)} />
                                 </span>
                               ) : (
@@ -673,10 +658,8 @@ export default function Dashboard() {
           )}
           {!loading && filteredSkus.length > 0 && (
             <div className="px-4 py-3 border-t border-gray-800/50 text-[11px] text-gray-500 leading-relaxed">
-              Stock values default to <span className="text-amber-300 font-medium">demo levels</span> derived from each
-              SKU&apos;s average demand. Click any stock cell to type a real value — overrides
-              are <span className="text-emerald-300 font-medium">server stored</span> when the stock API is available; otherwise they remain local in your
-              browser (green dot appears). Method badges identify how each recommendation was produced —{" "}
+              Stock values use <span className="text-amber-300 font-medium">demo defaults</span> until updated. Saved
+              values are stored on the server, with a local fallback for demo use. Method badges identify how each recommendation was produced —{" "}
               <span className="text-cyan-300">model</span>, <span className="text-violet-300">statistical</span>, or{" "}
               <span className="text-amber-300">rule-based fallback</span>.
             </div>
@@ -692,11 +675,8 @@ export default function Dashboard() {
               title="Recent analyses"
               subtitle="Every /api/analyze call is persisted for inspection. Click a row to open that SKU's analysis workspace."
               right={
-                <span
-                  className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-gray-500/10 text-gray-400 border-gray-500/30 tracking-wider"
-                  title="Persisted in a local SQLite file at backend/data/analyses.sqlite. Local/demo store — not a production analytics system."
-                >
-                  SQLITE · LOCAL
+                <span className="text-[10px] font-semibold px-2 py-0.5 rounded-full border bg-gray-500/10 text-gray-400 border-gray-500/30 tracking-wider">
+                  Persisted
                 </span>
               }
             />
@@ -730,7 +710,7 @@ export default function Dashboard() {
                             <span className="text-gray-600">—</span>
                           )}
                         </td>
-                        <td className="px-4 py-2.5 text-gray-300">{row.forecast_method || "—"}</td>
+                        <td className="px-4 py-2.5 text-gray-300">{formatForecastMethod(row.forecast_method) || "—"}</td>
                         <td className="px-4 py-2.5 text-right">
                           <span className="inline-flex items-center gap-2 justify-end w-full">
                             {row.recommended_order && row.recommended_order > 0 ? (
@@ -767,3 +747,4 @@ export default function Dashboard() {
     </div>
   );
 }
+

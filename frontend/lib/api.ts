@@ -1,5 +1,4 @@
 import { env } from "./env";
-import { getStockForSku } from "./stock";
 
 const API = env.apiUrl;
 
@@ -64,13 +63,32 @@ export interface DecisionBlock {
   service_level: number;
   inventory_gap: number;
   why: string;
+  constraints?: {
+    raw_order_quantity: number;
+    final_order_quantity: number;
+    moq?: number | null;
+    order_multiple?: number | null;
+    max_order_quantity?: number | null;
+    constraints_applied: string[];
+    moq_applied: boolean;
+    order_multiple_applied: boolean;
+    max_order_cap_applied: boolean;
+    constrained: boolean;
+    remaining_gap_after_order: number;
+  };
 }
 
 export interface SkuAnalysis {
   sku: string;
   risk: "HIGH" | "MEDIUM" | "LOW";
   risk_color: string;
-  forecast: { p50: number; p90: number; daily: number[] };
+  forecast: {
+    p50: number;
+    p90: number;
+    daily: number[];
+    full_horizon_daily?: number[];
+    horizon_days?: number;
+  };
   current_stock: number;
   recommended_order: number;
   action: string;
@@ -196,7 +214,7 @@ export interface SkuHistory {
   series_type?: "recorded_history";
   /** Human-readable: what the numeric values actually mean. */
   value_meaning?: "actual_units_sold";
-  /** Where the numbers came from — "processed_dataset" for real sales. */
+  /** Where the numbers came from, usually "processed_dataset" for historical demand. */
   source?: "processed_dataset";
   description?: string;
   summary?: SkuHistorySummary | null;
@@ -312,41 +330,4 @@ export const api = new ApiClient();
 export function computeDemoStock(avgDemand: number, index: number): number {
   const multipliers = [0.3, 0.8, 2.0];
   return Math.max(1, Math.round(avgDemand * multipliers[index % 3]));
-}
-
-// Utility: export data as CSV. Respects any user-entered stock overrides
-// (localStorage) and falls back to the demo value when no override is set.
-export function exportToCsv(
-  filename: string,
-  skus: SkuDetail[],
-  analyses: Record<string, SkuAnalysis>
-) {
-  const headers = ["SKU", "Product", "Stock", "Stock Origin", "Risk", "Pattern", "Method", "Order Qty", "P50", "P90"];
-  const rows = skus.map((sku, i) => {
-    const a = analyses[sku.id];
-    const demo = computeDemoStock(sku.avg_demand, i);
-    const stock = getStockForSku(sku.id, demo);
-    const origin = stock === demo ? "demo" : "user";
-    return [
-      sku.id,
-      `"${sku.name}"`,
-      stock,
-      origin,
-      a?.risk || "",
-      a?.demand_pattern || "",
-      a?.forecast_method || "",
-      a?.recommended_order || 0,
-      a?.forecast?.p50 || "",
-      a?.forecast?.p90 || "",
-    ].join(",");
-  });
-
-  const csv = [headers.join(","), ...rows].join("\n");
-  const blob = new Blob([csv], { type: "text/csv" });
-  const url = URL.createObjectURL(blob);
-  const link = document.createElement("a");
-  link.href = url;
-  link.download = filename;
-  link.click();
-  URL.revokeObjectURL(url);
 }

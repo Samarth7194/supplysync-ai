@@ -92,13 +92,13 @@ def test_analyze_marks_request_when_demand_supplied():
 
 def test_forecast_source_classification_is_consistent():
     """Method → source classification must be deterministic and complete."""
-    from main import _classify_forecast_source
+    from services.analysis_service import classify_forecast_source
 
-    assert _classify_forecast_source("ml_lightgbm") == "model_forecast"
-    assert _classify_forecast_source("croston") == "statistical_method"
-    assert _classify_forecast_source("conservative") == "statistical_method"
-    assert _classify_forecast_source("simple_average") == "rule_based_estimate"
+    assert classify_forecast_source("ml_lightgbm") == "model_forecast"
+    assert classify_forecast_source("croston") == "statistical_method"
+    assert classify_forecast_source("conservative") == "statistical_method"
+    assert classify_forecast_source("simple_average") == "rule_based_estimate"
     # Anything we haven't deliberately classified must degrade to "unavailable",
     # not masquerade as a real forecast.
-    assert _classify_forecast_source("something_new") == "unavailable"
-    assert _classify_forecast_source("") == "unavailable"
+    assert classify_forecast_source("something_new") == "unavailable"
+    assert classify_forecast_source("") == "unavailable"
