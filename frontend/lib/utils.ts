@@ -26,6 +26,22 @@ export function formatRelativeTime(iso: string | Date): string {
   return then.toISOString().slice(0, 10);
 }
 
+export function formatNumber(
+  value: number | null | undefined,
+  options: Intl.NumberFormatOptions = {},
+): string {
+  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
+  return new Intl.NumberFormat("en-US", options).format(value);
+}
+
+export function formatUnits(
+  value: number | null | undefined,
+  options: Intl.NumberFormatOptions = {},
+): string {
+  const formatted = formatNumber(value, options);
+  return formatted === "—" ? formatted : `${formatted} units`;
+}
+
 export function formatForecastMethod(method: string | null | undefined): string {
   const labels: Record<string, string> = {
     ml_lightgbm: "LightGBM",

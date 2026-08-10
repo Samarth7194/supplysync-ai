@@ -36,7 +36,12 @@ import {
   clearStockForSku,
   type StockOrigin,
 } from "@/lib/stock";
-import { formatDemandPattern, formatForecastMethod } from "@/lib/utils";
+import {
+  formatDemandPattern,
+  formatForecastMethod,
+  formatNumber,
+  formatUnits,
+} from "@/lib/utils";
 
 const API = env.apiUrl;
 const HISTORY_DAYS = 30;
@@ -81,11 +86,6 @@ interface Analysis {
   decision?: DecisionBlock;
   model_info?: ModelInfo;
   explanation?: ExplanationBlock;
-}
-
-function formatUnits(value: number | null | undefined): string {
-  if (typeof value !== "number" || !Number.isFinite(value)) return "—";
-  return `${Math.round(value).toLocaleString()} units`;
 }
 
 interface HistoryPoint {
@@ -370,7 +370,7 @@ export default function SKUDetail() {
                     {analysis.recommended_order > 0 ? (
                       <>
                         <span className="text-3xl md:text-[36px] font-bold text-white tracking-tight tabular-nums">
-                          Order {analysis.recommended_order}
+                          Order {formatNumber(analysis.recommended_order)}
                         </span>
                         <span className="text-sm text-gray-400">units</span>
                         {analysis.decision?.constraints?.max_order_cap_applied && (
@@ -533,7 +533,7 @@ export default function SKUDetail() {
                     }`}
                     title={
                       stockOrigin === "user"
-                        ? "Saved locally as a demo fallback."
+                        ? "Saved in this browser because the stock API was unavailable."
                         : stockOrigin === "server"
                           ? "Stored by the backend stock API."
                           : "Demo value derived from this SKU's average demand."
@@ -542,7 +542,7 @@ export default function SKUDetail() {
                     {stockOrigin === "server"
                       ? "Server stored"
                       : stockOrigin === "user"
-                        ? "Local fallback"
+                        ? "Browser saved"
                         : "Demo value"}
                   </span>
                 </div>
@@ -688,7 +688,10 @@ export default function SKUDetail() {
                     <Tooltip
                       contentStyle={{ background: "#111827", border: "1px solid #374151", borderRadius: 8, fontSize: 12 }}
                       labelStyle={{ color: "#9ca3af" }}
-                      formatter={(value) => [`${value as number} units`, "Actual units sold"]}
+                      formatter={(value) => [
+                        formatUnits(Number(value), { maximumFractionDigits: 1 }),
+                        "Actual units sold",
+                      ]}
                       labelFormatter={(label) => `Date: ${label as string}  (recorded sale)`}
                     />
                     <Bar dataKey="demand" name="Actual units sold" fill="#3b82f6" radius={[4, 4, 0, 0]} />
@@ -696,18 +699,33 @@ export default function SKUDetail() {
                       y={analysis.forecast.p50}
                       stroke="#22c55e"
                       strokeDasharray="6 3"
-                      label={{ value: `Historical avg: ${analysis.forecast.p50}`, position: "right", fill: "#22c55e", fontSize: 11 }}
+                      label={{
+                        value: `Historical avg: ${formatNumber(analysis.forecast.p50, { maximumFractionDigits: 1 })}`,
+                        position: "right",
+                        fill: "#22c55e",
+                        fontSize: 11,
+                      }}
                     />
                     <ReferenceLine
                       y={analysis.forecast.p90}
                       stroke="#ef4444"
                       strokeDasharray="6 3"
-                      label={{ value: `Historical P90: ${analysis.forecast.p90}`, position: "right", fill: "#ef4444", fontSize: 11 }}
+                      label={{
+                        value: `Historical P90: ${formatNumber(analysis.forecast.p90, { maximumFractionDigits: 1 })}`,
+                        position: "right",
+                        fill: "#ef4444",
+                        fontSize: 11,
+                      }}
                     />
                     <ReferenceLine
                       y={stock}
                       stroke="#eab308"
-                      label={{ value: `Stock: ${stock}`, position: "right", fill: "#eab308", fontSize: 11 }}
+                      label={{
+                        value: `Stock: ${formatNumber(stock)}`,
+                        position: "right",
+                        fill: "#eab308",
+                        fontSize: 11,
+                      }}
                     />
                   </BarChart>
                 </ResponsiveContainer>
@@ -863,7 +881,7 @@ export default function SKUDetail() {
                 ) : (
                   <p className="text-xs text-gray-500">
                     {analysis.action === "PURCHASE"
-                      ? `Order ${analysis.recommended_order} units to bring stock above the reorder point.`
+                      ? `Order ${formatNumber(analysis.recommended_order)} units to bring stock above the reorder point.`
                       : "Current stock already covers the reorder point — no action needed."}
                   </p>
                 )}
@@ -890,14 +908,14 @@ export default function SKUDetail() {
                         }
                       />
                     </div>
-                    <p className="text-2xl font-bold tabular-nums mt-1">{stock}</p>
+                    <p className="text-2xl font-bold tabular-nums mt-1">{formatNumber(stock)}</p>
                   </div>
                   <div>
                     <p className="text-[11px] text-gray-500 uppercase tracking-wider">
                       Historical avg
                     </p>
                     <p className="text-2xl font-bold text-green-400 tabular-nums mt-1">
-                      {analysis.forecast.p50}
+                      {formatNumber(analysis.forecast.p50, { maximumFractionDigits: 1 })}
                     </p>
                   </div>
                   <div>
@@ -905,7 +923,7 @@ export default function SKUDetail() {
                       Historical P90
                     </p>
                     <p className="text-2xl font-bold text-red-400 tabular-nums mt-1">
-                      {analysis.forecast.p90}
+                      {formatNumber(analysis.forecast.p90, { maximumFractionDigits: 1 })}
                     </p>
                   </div>
                   <div>
@@ -916,7 +934,7 @@ export default function SKUDetail() {
                       Shortfall vs P90
                     </p>
                     <p className="text-2xl font-bold text-yellow-400 tabular-nums mt-1">
-                      {Math.max(0, Math.round(analysis.forecast.p90 - stock))}
+                      {formatNumber(Math.max(0, Math.round(analysis.forecast.p90 - stock)))}
                     </p>
                   </div>
                 </div>
@@ -1028,7 +1046,7 @@ export default function SKUDetail() {
                         </span>
                         {" = "}
                         <span className="text-cyan-300 font-medium">
-                          {analysis.decision.lead_time_demand} units
+                          {formatUnits(analysis.decision.lead_time_demand, { maximumFractionDigits: 1 })}
                         </span>
                         .
                       </>
@@ -1051,7 +1069,7 @@ export default function SKUDetail() {
                       <>
                         Buffer of{" "}
                         <span className="text-blue-300 font-medium">
-                          {analysis.decision.safety_stock} units
+                          {formatUnits(analysis.decision.safety_stock, { maximumFractionDigits: 1 })}
                         </span>{" "}
                         at{" "}
                         <span className="text-blue-300 font-medium">
@@ -1059,7 +1077,7 @@ export default function SKUDetail() {
                         </span>{" "}
                         service level ({analysis.decision.safety_stock_method}). Reorder point ={" "}
                         <span className="text-blue-300 font-medium">
-                          {analysis.decision.reorder_point}
+                          {formatNumber(analysis.decision.reorder_point, { maximumFractionDigits: 1 })}
                         </span>
                         .
                       </>
@@ -1081,28 +1099,28 @@ export default function SKUDetail() {
                   <p className="text-sm font-semibold text-white">4. Decision</p>
                   <p className="text-xs text-gray-400 mt-1">
                     Current stock{" "}
-                    <span className="text-white font-medium">{stock}</span>{" "}
+                    <span className="text-white font-medium">{formatNumber(stock)}</span>{" "}
                     {analysis.decision ? (
                       analysis.recommended_order > 0 ? (
                         <>
                           is{" "}
                           <span className="text-yellow-300 font-medium">
-                            {analysis.decision.inventory_gap}
+                            {formatNumber(analysis.decision.inventory_gap, { maximumFractionDigits: 1 })}
                           </span>{" "}
                           below the reorder point → order{" "}
                           <span className="text-green-400 font-medium">
-                            {analysis.recommended_order}
+                            {formatNumber(analysis.recommended_order)}
                           </span>{" "}
                           units.
                         </>
                       ) : (
                         <>
                           already covers the reorder point (
-                          {analysis.decision.reorder_point}) — no order.
+                          {formatNumber(analysis.decision.reorder_point, { maximumFractionDigits: 1 })}) — no order.
                         </>
                       )
                     ) : analysis.recommended_order > 0 ? (
-                      <> → order {analysis.recommended_order} units.</>
+                      <> → order {formatNumber(analysis.recommended_order)} units.</>
                     ) : (
                       <> → no action needed.</>
                     )}

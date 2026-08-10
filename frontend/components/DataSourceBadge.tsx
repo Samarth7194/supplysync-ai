@@ -29,8 +29,8 @@ const COPY: Record<ProvenanceKind, { label: string; tooltip: string; className: 
     className: "bg-sky-500/10 text-sky-300 border-sky-500/30",
   },
   user_stored: {
-    label: "Local fallback",
-    tooltip: "Saved locally as a demo fallback.",
+    label: "Browser saved",
+    tooltip: "Saved in this browser because the backend stock API was unavailable.",
     className: "bg-emerald-500/10 text-emerald-300 border-emerald-500/30",
   },
   server_stored: {

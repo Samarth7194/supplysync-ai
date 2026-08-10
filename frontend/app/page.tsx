@@ -32,7 +32,12 @@ import {
 import { EmptyState } from "@/components/EmptyState";
 import { SectionHeader } from "@/components/SectionHeader";
 import { env } from "@/lib/env";
-import { formatDemandPattern, formatForecastMethod, formatRelativeTime } from "@/lib/utils";
+import {
+  formatDemandPattern,
+  formatForecastMethod,
+  formatNumber,
+  formatRelativeTime,
+} from "@/lib/utils";
 import { ChevronRight, Pencil } from "lucide-react";
 import { getStockForSku, setStockForSku, getStockOrigin } from "@/lib/stock";
 
@@ -304,7 +309,7 @@ export default function Dashboard() {
           <div className="flex items-center gap-2 text-sm">
             <Activity className={`w-4 h-4 ${health?.status === "online" ? "text-green-500" : "text-gray-600"}`} />
             <span className="text-gray-400">
-              {health?.status === "online" ? "System Online" : "Connecting..."}
+              {health?.status === "online" ? "System Online" : "Connecting…"}
             </span>
             {health?.model_loaded && (
               <span className="text-xs bg-green-500/10 text-green-400 border border-green-500/20 px-2 py-0.5 rounded-full ml-2">
@@ -411,7 +416,7 @@ export default function Dashboard() {
         <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <KpiCard
             icon={TrendingDown}
-            value={kpis ? `${kpis.cost_savings_pct}%` : "..."}
+            value={kpis ? `${formatNumber(kpis.cost_savings_pct, { maximumFractionDigits: 1 })}%` : "…"}
             label="Cost Savings"
             sublabel="vs naive fixed-threshold policy"
             color="bg-green-600"
@@ -422,9 +427,9 @@ export default function Dashboard() {
           />
           <KpiCard
             icon={Target}
-            value={kpis ? `${(kpis.fill_rate * 100).toFixed(1)}%` : "..."}
+            value={kpis ? `${formatNumber(kpis.fill_rate * 100, { maximumFractionDigits: 1 })}%` : "…"}
             label="Fill Rate"
-            sublabel={`across ${kpis?.skus_analyzed || "..."} simulated SKUs`}
+            sublabel={`across ${kpis ? formatNumber(kpis.skus_analyzed) : "…"} simulated SKUs`}
             color="bg-blue-600"
             tooltip={
               kpis?.interpretation?.metric_meanings?.fill_rate ??
@@ -488,7 +493,7 @@ export default function Dashboard() {
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-500" aria-hidden="true" />
             <input
               type="text"
-              placeholder="Search SKUs..."
+              placeholder="Search SKUs…"
               aria-label="Search SKUs by code or product name"
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
@@ -587,13 +592,13 @@ export default function Dashboard() {
                                   className="inline-flex items-center gap-1.5 text-sm font-medium text-gray-200 tabular-nums hover:text-white cursor-text"
                                   title={
                                     origin === "user"
-                                      ? "Saved as a local demo fallback. Click to edit."
+                                      ? "Saved in this browser because the stock API was unavailable. Click to edit."
                                       : origin === "server"
                                         ? "Stored by the backend stock API. Click to edit."
                                       : "Demo value. Click to override with real stock."
                                   }
                                 >
-                                  {stock}
+                                  {formatNumber(stock)}
                                   {origin !== "demo" && (
                                     <span className="w-1 h-1 rounded-full bg-emerald-400" aria-hidden="true" />
                                   )}
@@ -620,7 +625,9 @@ export default function Dashboard() {
                             <td className="px-4 py-3.5 text-right">
                               <span className="inline-flex items-center gap-2 justify-end w-full">
                                 {a && a.recommended_order > 0 ? (
-                                  <span className="text-sm font-semibold text-blue-400 tabular-nums">{a.recommended_order}</span>
+                                  <span className="text-sm font-semibold text-blue-400 tabular-nums">
+                                    {formatNumber(a.recommended_order)}
+                                  </span>
                                 ) : a ? (
                                   <span className="text-sm text-gray-600">—</span>
                                 ) : (
@@ -659,7 +666,7 @@ export default function Dashboard() {
           {!loading && filteredSkus.length > 0 && (
             <div className="px-4 py-3 border-t border-gray-800/50 text-[11px] text-gray-500 leading-relaxed">
               Stock values use <span className="text-amber-300 font-medium">demo defaults</span> until updated. Saved
-              values are stored on the server, with a local fallback for demo use. Method badges identify how each recommendation was produced —{" "}
+              values are stored on the server, with a browser fallback if the stock API is unavailable. Method badges identify how each recommendation was produced —{" "}
               <span className="text-cyan-300">model</span>, <span className="text-violet-300">statistical</span>, or{" "}
               <span className="text-amber-300">rule-based fallback</span>.
             </div>
@@ -715,7 +722,7 @@ export default function Dashboard() {
                           <span className="inline-flex items-center gap-2 justify-end w-full">
                             {row.recommended_order && row.recommended_order > 0 ? (
                               <span className="text-blue-400 font-semibold tabular-nums">
-                                {row.recommended_order}
+                                {formatNumber(row.recommended_order)}
                               </span>
                             ) : (
                               <span className="text-gray-600">—</span>
