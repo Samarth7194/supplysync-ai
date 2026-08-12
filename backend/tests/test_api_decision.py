@@ -51,7 +51,7 @@ def test_analyze_returns_decision_block_with_all_fields():
             "lead_time_days", "lead_time_demand",
             "safety_stock", "safety_stock_method",
             "reorder_point", "service_level",
-            "inventory_gap", "why", "constraints",
+            "inventory_gap", "why", "constraints", "uncertainty",
         }
         assert set(d.keys()) == expected_keys
 
@@ -60,6 +60,7 @@ def test_analyze_returns_decision_block_with_all_fields():
         assert d["service_level"] == pytest.approx(0.95)
         assert d["inventory_gap"] >= 0
         assert isinstance(d["why"], str) and len(d["why"]) > 40
+        assert d["uncertainty"]["source"] in {"historical_demand_std", "sku_method_residuals", "sku_residuals", "pattern_residuals"}
 
 
 def test_decision_why_explains_order_when_stock_low():

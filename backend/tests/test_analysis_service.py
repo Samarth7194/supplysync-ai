@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from types import SimpleNamespace
 
 import pandas as pd
@@ -8,7 +8,7 @@ from sqlalchemy import create_engine, select
 from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
-from db.models import AnalysisRun, Base, ModelArtifact, PredictionLog, Sku
+from db.models import AnalysisRun, Base, InventoryPolicy, ModelArtifact, PredictionLog, Sku
 from repositories.analysis_repository import AnalysisRepository
 from services.analysis_service import AnalysisService
 
@@ -22,6 +22,17 @@ class _InventorySettings:
 @dataclass
 class _Settings:
     inventory: _InventorySettings
+    forecasting: object = field(
+        default_factory=lambda: SimpleNamespace(
+            evidence_routing_enabled=False,
+            routing_primary_metric="wape",
+            routing_min_evaluation_points=30,
+            routing_min_relative_improvement=0.05,
+            routing_evidence_lookback_days=365,
+            uncertainty_min_residual_observations=30,
+            uncertainty_residual_lookback_days=365,
+        )
+    )
 
 
 class _DataService:
@@ -46,6 +57,9 @@ class _InventoryService:
         lead_time_days,
         service_level,
         routing_service=None,
+        supplier_constraints=None,
+        policy_source=None,
+        uncertainty_service=None,
     ):
         forecast = [10.0] * lead_time_days
         intelligence = {
@@ -82,6 +96,9 @@ class _ConstrainedInventoryService(_InventoryService):
         lead_time_days,
         service_level,
         routing_service=None,
+        supplier_constraints=None,
+        policy_source=None,
+        uncertainty_service=None,
     ):
         forecast = [10.0] * lead_time_days
         lead_time_demand = sum(forecast)
@@ -182,6 +199,7 @@ def test_analysis_service_preserves_response_contract_and_persists_prediction():
     assert response["decision"]["constraints"]["raw_order_quantity"] == 42
     assert response["decision"]["constraints"]["final_order_quantity"] == 42
     assert response["decision"]["constraints"]["constrained"] is False
+    assert response["decision"]["uncertainty"]["source"] == "historical_demand_std"
 
     analysis = session.scalar(select(AnalysisRun))
     prediction = session.scalar(select(PredictionLog))
@@ -372,3 +390,39 @@ def test_routing_reason_is_persisted_when_available():
     prediction = session.scalar(select(PredictionLog))
     assert analysis.routing_reason == "Croston had sufficient logged evidence."
     assert prediction.routing_reason == "Croston had sufficient logged evidence."
+
+
+def test_persisted_inventory_policy_overrides_pattern_constraints_and_defaults():
+    session = _session()
+    sku = Sku(sku_code="SKU-1", name="Known SKU")
+    session.add(sku)
+    session.flush()
+    session.add(
+        InventoryPolicy(
+            sku_id=sku.id,
+            lead_time_days=9,
+            service_level=0.90,
+            moq=25,
+            order_multiple=10,
+            max_order_quantity=250,
+            is_active=True,
+        )
+    )
+    session.flush()
+    data_service = _DataService({"SKU-1": pd.Series([8.0] * 30, index=pd.date_range("2024-01-01", periods=30))})
+    service = _service(
+        session,
+        data_service,
+        inventory_service=_ConstrainedInventoryService(
+            original_quantity=420,
+            final_quantity=250,
+            max_order_quantity=250,
+        ),
+    )
+
+    response = service.analyze(_request(current_stock=100))
+
+    assert response["decision"]["lead_time_days"] == 9
+    assert response["decision"]["service_level"] == 0.90
+    assert response["decision"]["constraints"]["policy_source"] == "sku_policy"
+    assert response["decision"]["constraints"]["max_order_quantity"] == 250

@@ -247,3 +247,46 @@ def test_offline_pattern_evidence_can_bootstrap_when_horizon_matches(tmp_path):
     assert decision.selected_method == "croston"
     assert decision.selection_source == "offline"
     assert decision.evidence_level == "pattern"
+
+
+def test_offline_multi_horizon_sibling_evidence_is_used_when_horizon_matches(tmp_path):
+    path = tmp_path / "forecast_evaluation.json"
+    path.write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-08-01T00:00:00+00:00",
+                "horizon_days": 30,
+                "aggregates": {},
+            }
+        )
+    )
+    (tmp_path / "forecast_evaluation_horizons.json").write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-08-01T00:00:00+00:00",
+                "horizons": {
+                    "7": {
+                        "generated_at": "2026-08-01T00:00:00+00:00",
+                        "horizon_days": 7,
+                        "aggregates": {
+                            "regular": {
+                                "lightgbm": {"wape": 1.0, "n_test_points": 100, "bias": 0.0},
+                                "croston_sba": {"wape": 0.7, "n_test_points": 100, "bias": 0.0},
+                            }
+                        },
+                    }
+                },
+            }
+        )
+    )
+
+    decision = _router(_Repo(), offline_path=path).select_method(
+        sku_code="SKU-1",
+        demand_pattern="regular",
+        forecast_horizon=7,
+        as_of_date=date(2026, 8, 8),
+    )
+
+    assert decision.selected_method == "croston"
+    assert decision.selection_source == "offline"
+    assert decision.evidence_level == "pattern"
