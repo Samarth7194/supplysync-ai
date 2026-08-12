@@ -69,12 +69,23 @@ export interface DecisionBlock {
     moq?: number | null;
     order_multiple?: number | null;
     max_order_quantity?: number | null;
+    policy_source?: "sku_policy" | "pattern_default" | string;
     constraints_applied: string[];
     moq_applied: boolean;
     order_multiple_applied: boolean;
     max_order_cap_applied: boolean;
     constrained: boolean;
     remaining_gap_after_order: number;
+  };
+  uncertainty?: {
+    source: string;
+    sigma: number;
+    sample_count: number;
+    lookback_days?: number | null;
+    fallback_used: boolean;
+    method?: string | null;
+    horizon_days?: number | null;
+    demand_pattern?: string | null;
   };
 }
 

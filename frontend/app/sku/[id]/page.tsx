@@ -58,6 +58,11 @@ function formatShortDate(iso?: string | null): string {
   return d.toISOString().slice(0, 10); // YYYY-MM-DD, tz-stable
 }
 
+function formatSourceLabel(value?: string | null): string {
+  if (!value) return "unavailable";
+  return value.replace(/_/g, " ");
+}
+
 interface SkuDetail {
   id: string;
   name: string;
@@ -995,6 +1000,30 @@ export default function SKUDetail() {
                   }
                   emphasis={analysis.model_info.evaluation_available ? "muted" : "warning"}
                 />
+                {analysis.decision?.uncertainty && (
+                  <InfoRow
+                    label="Uncertainty"
+                    value={formatSourceLabel(analysis.decision.uncertainty.source)}
+                    hint={
+                      analysis.decision.uncertainty.fallback_used
+                        ? "Safety stock used historical demand standard deviation because compatible residual evidence was insufficient."
+                        : `${analysis.decision.uncertainty.sample_count} residual observations informed sigma.`
+                    }
+                    emphasis={analysis.decision.uncertainty.fallback_used ? "warning" : "default"}
+                  />
+                )}
+                {analysis.decision?.constraints?.policy_source && (
+                  <InfoRow
+                    label="Policy"
+                    value={formatSourceLabel(analysis.decision.constraints.policy_source)}
+                    hint={
+                      analysis.decision.constraints.policy_source === "sku_policy"
+                        ? "Supplier constraints came from a persisted SKU inventory policy."
+                        : "Supplier constraints came from the demand-pattern default policy."
+                    }
+                    emphasis="muted"
+                  />
+                )}
                 </div>
               </div>
             )}
