@@ -1,0 +1,1057 @@
+{
+  "generated_at": "2026-08-11T23:16:24.459098",
+  "source": "offline_backtest",
+  "note": "Offline historical backtest artifact; not live production performance.",
+  "horizon_summary": {
+    "3": {
+      "naive_last": {
+        "mae": 138.35,
+        "rmse": 169.2041,
+        "bias": 12.0167,
+        "wape": 1.2159,
+        "mase": 0.9844,
+        "n_skus": 20,
+        "n_test_points": 60
+      },
+      "seasonal_naive_7": {
+        "mae": 135.2333,
+        "rmse": 175.5358,
+        "bias": 12.3333,
+        "wape": 1.1885,
+        "mase": 1.0541,
+        "n_skus": 20,
+        "n_test_points": 60
+      },
+      "moving_avg_7": {
+        "mae": 100.5738,
+        "rmse": 128.9156,
+        "bias": -25.0548,
+        "wape": 0.8839,
+        "mase": 0.7387,
+        "n_skus": 20,
+        "n_test_points": 60
+      },
+      "croston_sba": {
+        "mae": 92.9532,
+        "rmse": 124.5976,
+        "bias": -29.6728,
+        "wape": 0.8169,
+        "mase": 0.6774,
+        "n_skus": 20,
+        "n_test_points": 60
+      },
+      "lightgbm": {
+        "mae": 116.7594,
+        "rmse": 164.5918,
+        "bias": 13.2049,
+        "wape": 1.0261,
+        "mase": 0.9222,
+        "n_skus": 20,
+        "n_test_points": 60
+      }
+    },
+    "7": {
+      "naive_last": {
+        "mae": 115.2214,
+        "rmse": 169.0023,
+        "bias": 19.25,
+        "wape": 1.4286,
+        "mase": 0.9187,
+        "n_skus": 20,
+        "n_test_points": 140
+      },
+      "seasonal_naive_7": {
+        "mae": 85.1643,
+        "rmse": 138.761,
+        "bias": 1.8072,
+        "wape": 1.056,
+        "mase": 0.6879,
+        "n_skus": 20,
+        "n_test_points": 140
+      },
+      "moving_avg_7": {
+        "mae": 82.3327,
+        "rmse": 113.459,
+        "bias": 5.9551,
+        "wape": 1.0209,
+        "mase": 0.6678,
+        "n_skus": 20,
+        "n_test_points": 140
+      },
+      "croston_sba": {
+        "mae": 79.9704,
+        "rmse": 114.2745,
+        "bias": 4.2282,
+        "wape": 0.9916,
+        "mase": 0.6495,
+        "n_skus": 20,
+        "n_test_points": 140
+      },
+      "lightgbm": {
+        "mae": 85.9356,
+        "rmse": 139.63,
+        "bias": 24.6268,
+        "wape": 1.0655,
+        "mase": 0.7313,
+        "n_skus": 20,
+        "n_test_points": 140
+      }
+    },
+    "14": {
+      "naive_last": {
+        "mae": 98.8786,
+        "rmse": 151.1002,
+        "bias": 3.05,
+        "wape": 1.2124,
+        "mase": 0.8294,
+        "n_skus": 20,
+        "n_test_points": 280
+      },
+      "seasonal_naive_7": {
+        "mae": 78.7464,
+        "rmse": 131.2363,
+        "bias": 2.7393,
+        "wape": 0.9656,
+        "mase": 0.6622,
+        "n_skus": 20,
+        "n_test_points": 280
+      },
+      "moving_avg_7": {
+        "mae": 79.3617,
+        "rmse": 112.8712,
+        "bias": 0.1781,
+        "wape": 0.9731,
+        "mase": 0.669,
+        "n_skus": 20,
+        "n_test_points": 280
+      },
+      "croston_sba": {
+        "mae": 77.1845,
+        "rmse": 111.6012,
+        "bias": 3.1591,
+        "wape": 0.9464,
+        "mase": 0.6509,
+        "n_skus": 20,
+        "n_test_points": 280
+      },
+      "lightgbm": {
+        "mae": 91.8435,
+        "rmse": 145.0083,
+        "bias": 38.0989,
+        "wape": 1.1262,
+        "mase": 0.8108,
+        "n_skus": 20,
+        "n_test_points": 280
+      }
+    },
+    "30": {
+      "naive_last": {
+        "mae": 109.92,
+        "rmse": 175.1231,
+        "bias": 5.8167,
+        "wape": 1.189,
+        "mase": 0.9659,
+        "n_skus": 20,
+        "n_test_points": 600
+      },
+      "seasonal_naive_7": {
+        "mae": 92.7983,
+        "rmse": 166.2143,
+        "bias": 5.595,
+        "wape": 1.0038,
+        "mase": 0.8221,
+        "n_skus": 20,
+        "n_test_points": 600
+      },
+      "moving_avg_7": {
+        "mae": 86.3972,
+        "rmse": 129.3754,
+        "bias": 2.2467,
+        "wape": 0.9345,
+        "mase": 0.7618,
+        "n_skus": 20,
+        "n_test_points": 600
+      },
+      "croston_sba": {
+        "mae": 80.4076,
+        "rmse": 125.879,
+        "bias": -1.4639,
+        "wape": 0.8697,
+        "mase": 0.7055,
+        "n_skus": 20,
+        "n_test_points": 600
+      },
+      "lightgbm": {
+        "mae": 95.6225,
+        "rmse": 150.1822,
+        "bias": 31.0437,
+        "wape": 1.0343,
+        "mase": 0.8619,
+        "n_skus": 20,
+        "n_test_points": 600
+      }
+    }
+  },
+  "pattern_summary": {
+    "regular": {
+      "3": {
+        "naive_last": {
+          "mae": 157.2941,
+          "rmse": 191.7579,
+          "bias": 16.7843,
+          "wape": 1.2486,
+          "mase": 1.1203,
+          "n_skus": 17,
+          "n_test_points": 51
+        },
+        "seasonal_naive_7": {
+          "mae": 146.9412,
+          "rmse": 190.6243,
+          "bias": 12.1176,
+          "wape": 1.1664,
+          "mase": 1.1384,
+          "n_skus": 17,
+          "n_test_points": 51
+        },
+        "moving_avg_7": {
+          "mae": 111.1205,
+          "rmse": 143.9665,
+          "bias": -26.0784,
+          "wape": 0.882,
+          "mase": 0.8189,
+          "n_skus": 17,
+          "n_test_points": 51
+        },
+        "croston_sba": {
+          "mae": 104.2722,
+          "rmse": 140.9186,
+          "bias": -32.7395,
+          "wape": 0.8277,
+          "mase": 0.7645,
+          "n_skus": 17,
+          "n_test_points": 51
+        },
+        "lightgbm": {
+          "mae": 131.0411,
+          "rmse": 185.6802,
+          "bias": 12.9179,
+          "wape": 1.0401,
+          "mase": 1.0352,
+          "n_skus": 17,
+          "n_test_points": 51
+        }
+      },
+      "7": {
+        "naive_last": {
+          "mae": 130.2521,
+          "rmse": 190.838,
+          "bias": 23.7143,
+          "wape": 1.4478,
+          "mase": 1.0474,
+          "n_skus": 17,
+          "n_test_points": 119
+        },
+        "seasonal_naive_7": {
+          "mae": 91.7143,
+          "rmse": 149.9005,
+          "bias": 0.437,
+          "wape": 1.0194,
+          "mase": 0.7455,
+          "n_skus": 17,
+          "n_test_points": 119
+        },
+        "moving_avg_7": {
+          "mae": 90.0084,
+          "rmse": 125.4728,
+          "bias": 6.3757,
+          "wape": 1.0005,
+          "mase": 0.7378,
+          "n_skus": 17,
+          "n_test_points": 119
+        },
+        "croston_sba": {
+          "mae": 88.3264,
+          "rmse": 127.7496,
+          "bias": 3.9395,
+          "wape": 0.9818,
+          "mase": 0.7276,
+          "n_skus": 17,
+          "n_test_points": 119
+        },
+        "lightgbm": {
+          "mae": 90.8688,
+          "rmse": 151.1228,
+          "bias": 20.4775,
+          "wape": 1.01,
+          "mase": 0.7902,
+          "n_skus": 17,
+          "n_test_points": 119
+        }
+      },
+      "14": {
+        "naive_last": {
+          "mae": 108.7395,
+          "rmse": 165.0488,
+          "bias": 3.9748,
+          "wape": 1.2058,
+          "mase": 0.9195,
+          "n_skus": 17,
+          "n_test_points": 238
+        },
+        "seasonal_naive_7": {
+          "mae": 80.8613,
+          "rmse": 136.2597,
+          "bias": -0.1807,
+          "wape": 0.8966,
+          "mase": 0.6874,
+          "n_skus": 17,
+          "n_test_points": 238
+        },
+        "moving_avg_7": {
+          "mae": 85.1639,
+          "rmse": 122.5093,
+          "bias": -1.4256,
+          "wape": 0.9443,
+          "mase": 0.7247,
+          "n_skus": 17,
+          "n_test_points": 238
+        },
+        "croston_sba": {
+          "mae": 84.4154,
+          "rmse": 122.2351,
+          "bias": 3.3078,
+          "wape": 0.936,
+          "mase": 0.7193,
+          "n_skus": 17,
+          "n_test_points": 238
+        },
+        "lightgbm": {
+          "mae": 94.9154,
+          "rmse": 151.6384,
+          "bias": 35.4324,
+          "wape": 1.0525,
+          "mase": 0.8562,
+          "n_skus": 17,
+          "n_test_points": 238
+        }
+      },
+      "30": {
+        "naive_last": {
+          "mae": 119.8039,
+          "rmse": 189.9577,
+          "bias": 7.1373,
+          "wape": 1.1716,
+          "mase": 1.0663,
+          "n_skus": 17,
+          "n_test_points": 510
+        },
+        "seasonal_naive_7": {
+          "mae": 99.6941,
+          "rmse": 179.1527,
+          "bias": 7.4627,
+          "wape": 0.9749,
+          "mase": 0.8972,
+          "n_skus": 17,
+          "n_test_points": 510
+        },
+        "moving_avg_7": {
+          "mae": 93.691,
+          "rmse": 139.9293,
+          "bias": 3.3443,
+          "wape": 0.9162,
+          "mase": 0.838,
+          "n_skus": 17,
+          "n_test_points": 510
+        },
+        "croston_sba": {
+          "mae": 87.5667,
+          "rmse": 136.4022,
+          "bias": -0.8752,
+          "wape": 0.8563,
+          "mase": 0.7801,
+          "n_skus": 17,
+          "n_test_points": 510
+        },
+        "lightgbm": {
+          "mae": 99.3666,
+          "rmse": 158.4709,
+          "bias": 29.0804,
+          "wape": 0.9717,
+          "mase": 0.9234,
+          "n_skus": 17,
+          "n_test_points": 510
+        }
+      }
+    },
+    "intermittent": {
+      "3": {
+        "naive_last": {
+          "mae": 31.0,
+          "rmse": 41.3989,
+          "bias": -15.0,
+          "wape": 0.694,
+          "mase": 0.2145,
+          "n_skus": 3,
+          "n_test_points": 9
+        },
+        "seasonal_naive_7": {
+          "mae": 68.8889,
+          "rmse": 90.0344,
+          "bias": 13.5556,
+          "wape": 1.5423,
+          "mase": 0.5764,
+          "n_skus": 3,
+          "n_test_points": 9
+        },
+        "moving_avg_7": {
+          "mae": 40.8095,
+          "rmse": 43.6269,
+          "bias": -19.254,
+          "wape": 0.9137,
+          "mase": 0.284,
+          "n_skus": 3,
+          "n_test_points": 9
+        },
+        "croston_sba": {
+          "mae": 28.8122,
+          "rmse": 32.1115,
+          "bias": -12.2951,
+          "wape": 0.645,
+          "mase": 0.184,
+          "n_skus": 3,
+          "n_test_points": 9
+        },
+        "lightgbm": {
+          "mae": 35.8296,
+          "rmse": 45.091,
+          "bias": 14.8312,
+          "wape": 0.8021,
+          "mase": 0.2819,
+          "n_skus": 3,
+          "n_test_points": 9
+        }
+      },
+      "7": {
+        "naive_last": {
+          "mae": 30.0476,
+          "rmse": 45.2663,
+          "bias": -6.0476,
+          "wape": 1.0787,
+          "mase": 0.1894,
+          "n_skus": 3,
+          "n_test_points": 21
+        },
+        "seasonal_naive_7": {
+          "mae": 48.0476,
+          "rmse": 75.637,
+          "bias": 9.5714,
+          "wape": 1.7248,
+          "mase": 0.3617,
+          "n_skus": 3,
+          "n_test_points": 21
+        },
+        "moving_avg_7": {
+          "mae": 38.8368,
+          "rmse": 45.3808,
+          "bias": 3.5714,
+          "wape": 1.3941,
+          "mase": 0.2715,
+          "n_skus": 3,
+          "n_test_points": 21
+        },
+        "croston_sba": {
+          "mae": 32.6198,
+          "rmse": 37.9154,
+          "bias": 5.864,
+          "wape": 1.171,
+          "mase": 0.2072,
+          "n_skus": 3,
+          "n_test_points": 21
+        },
+        "lightgbm": {
+          "mae": 57.9807,
+          "rmse": 74.504,
+          "bias": 48.1392,
+          "wape": 2.0813,
+          "mase": 0.3974,
+          "n_skus": 3,
+          "n_test_points": 21
+        }
+      },
+      "14": {
+        "naive_last": {
+          "mae": 43.0,
+          "rmse": 72.0579,
+          "bias": -2.1905,
+          "wape": 1.3172,
+          "mase": 0.3184,
+          "n_skus": 3,
+          "n_test_points": 42
+        },
+        "seasonal_naive_7": {
+          "mae": 66.7619,
+          "rmse": 102.7704,
+          "bias": 19.2857,
+          "wape": 2.0452,
+          "mase": 0.5192,
+          "n_skus": 3,
+          "n_test_points": 42
+        },
+        "moving_avg_7": {
+          "mae": 46.483,
+          "rmse": 58.2551,
+          "bias": 9.2653,
+          "wape": 1.424,
+          "mase": 0.3533,
+          "n_skus": 3,
+          "n_test_points": 42
+        },
+        "croston_sba": {
+          "mae": 36.2096,
+          "rmse": 51.3424,
+          "bias": 2.3165,
+          "wape": 1.1093,
+          "mase": 0.2635,
+          "n_skus": 3,
+          "n_test_points": 42
+        },
+        "lightgbm": {
+          "mae": 74.4358,
+          "rmse": 107.4381,
+          "bias": 53.209,
+          "wape": 2.2803,
+          "mase": 0.5536,
+          "n_skus": 3,
+          "n_test_points": 42
+        }
+      },
+      "30": {
+        "naive_last": {
+          "mae": 53.9111,
+          "rmse": 91.0604,
+          "bias": -1.6667,
+          "wape": 1.4619,
+          "mase": 0.3967,
+          "n_skus": 3,
+          "n_test_points": 90
+        },
+        "seasonal_naive_7": {
+          "mae": 53.7222,
+          "rmse": 92.8971,
+          "bias": -4.9889,
+          "wape": 1.4568,
+          "mase": 0.3965,
+          "n_skus": 3,
+          "n_test_points": 90
+        },
+        "moving_avg_7": {
+          "mae": 45.0651,
+          "rmse": 69.5703,
+          "bias": -3.973,
+          "wape": 1.222,
+          "mase": 0.3302,
+          "n_skus": 3,
+          "n_test_points": 90
+        },
+        "croston_sba": {
+          "mae": 39.8396,
+          "rmse": 66.2475,
+          "bias": -4.7997,
+          "wape": 1.0803,
+          "mase": 0.2825,
+          "n_skus": 3,
+          "n_test_points": 90
+        },
+        "lightgbm": {
+          "mae": 74.4058,
+          "rmse": 103.2129,
+          "bias": 42.1689,
+          "wape": 2.0176,
+          "mase": 0.5131,
+          "n_skus": 3,
+          "n_test_points": 90
+        }
+      }
+    }
+  },
+  "method_win_counts": [
+    {
+      "horizon_days": "14",
+      "scope": "all",
+      "model": "croston_sba",
+      "wins": 1
+    },
+    {
+      "horizon_days": "14",
+      "scope": "intermittent",
+      "model": "croston_sba",
+      "wins": 1
+    },
+    {
+      "horizon_days": "14",
+      "scope": "regular",
+      "model": "seasonal_naive_7",
+      "wins": 1
+    },
+    {
+      "horizon_days": "14",
+      "scope": "sku",
+      "model": "croston_sba",
+      "wins": 4
+    },
+    {
+      "horizon_days": "14",
+      "scope": "sku",
+      "model": "lightgbm",
+      "wins": 2
+    },
+    {
+      "horizon_days": "14",
+      "scope": "sku",
+      "model": "moving_avg_7",
+      "wins": 1
+    },
+    {
+      "horizon_days": "14",
+      "scope": "sku",
+      "model": "naive_last",
+      "wins": 4
+    },
+    {
+      "horizon_days": "14",
+      "scope": "sku",
+      "model": "seasonal_naive_7",
+      "wins": 9
+    },
+    {
+      "horizon_days": "3",
+      "scope": "all",
+      "model": "croston_sba",
+      "wins": 1
+    },
+    {
+      "horizon_days": "3",
+      "scope": "intermittent",
+      "model": "croston_sba",
+      "wins": 1
+    },
+    {
+      "horizon_days": "3",
+      "scope": "regular",
+      "model": "croston_sba",
+      "wins": 1
+    },
+    {
+      "horizon_days": "3",
+      "scope": "sku",
+      "model": "croston_sba",
+      "wins": 3
+    },
+    {
+      "horizon_days": "3",
+      "scope": "sku",
+      "model": "lightgbm",
+      "wins": 3
+    },
+    {
+      "horizon_days": "3",
+      "scope": "sku",
+      "model": "moving_avg_7",
+      "wins": 5
+    },
+    {
+      "horizon_days": "3",
+      "scope": "sku",
+      "model": "naive_last",
+      "wins": 5
+    },
+    {
+      "horizon_days": "3",
+      "scope": "sku",
+      "model": "seasonal_naive_7",
+      "wins": 4
+    },
+    {
+      "horizon_days": "30",
+      "scope": "all",
+      "model": "croston_sba",
+      "wins": 1
+    },
+    {
+      "horizon_days": "30",
+      "scope": "intermittent",
+      "model": "croston_sba",
+      "wins": 1
+    },
+    {
+      "horizon_days": "30",
+      "scope": "regular",
+      "model": "croston_sba",
+      "wins": 1
+    },
+    {
+      "horizon_days": "30",
+      "scope": "sku",
+      "model": "croston_sba",
+      "wins": 11
+    },
+    {
+      "horizon_days": "30",
+      "scope": "sku",
+      "model": "lightgbm",
+      "wins": 3
+    },
+    {
+      "horizon_days": "30",
+      "scope": "sku",
+      "model": "moving_avg_7",
+      "wins": 3
+    },
+    {
+      "horizon_days": "30",
+      "scope": "sku",
+      "model": "naive_last",
+      "wins": 1
+    },
+    {
+      "horizon_days": "30",
+      "scope": "sku",
+      "model": "seasonal_naive_7",
+      "wins": 2
+    },
+    {
+      "horizon_days": "7",
+      "scope": "all",
+      "model": "croston_sba",
+      "wins": 1
+    },
+    {
+      "horizon_days": "7",
+      "scope": "intermittent",
+      "model": "naive_last",
+      "wins": 1
+    },
+    {
+      "horizon_days": "7",
+      "scope": "regular",
+      "model": "croston_sba",
+      "wins": 1
+    },
+    {
+      "horizon_days": "7",
+      "scope": "sku",
+      "model": "croston_sba",
+      "wins": 4
+    },
+    {
+      "horizon_days": "7",
+      "scope": "sku",
+      "model": "lightgbm",
+      "wins": 4
+    },
+    {
+      "horizon_days": "7",
+      "scope": "sku",
+      "model": "moving_avg_7",
+      "wins": 3
+    },
+    {
+      "horizon_days": "7",
+      "scope": "sku",
+      "model": "naive_last",
+      "wins": 2
+    },
+    {
+      "horizon_days": "7",
+      "scope": "sku",
+      "model": "seasonal_naive_7",
+      "wins": 7
+    }
+  ],
+  "distributions": {
+    "croston_sba": {
+      "wape": {
+        "count": 80,
+        "min": 0.1954,
+        "median": 1.0005,
+        "max": 8.9351
+      },
+      "mae": {
+        "count": 80,
+        "min": 8.4006,
+        "median": 44.3261,
+        "max": 1040.0841
+      },
+      "bias": {
+        "count": 80,
+        "min": -781.5993,
+        "median": 6.974,
+        "max": 80.4593
+      }
+    },
+    "lightgbm": {
+      "wape": {
+        "count": 80,
+        "min": 0.1451,
+        "median": 1.4149,
+        "max": 24.9353
+      },
+      "mae": {
+        "count": 80,
+        "min": 12.5776,
+        "median": 65.8381,
+        "max": 983.6748
+      },
+      "bias": {
+        "count": 80,
+        "min": -954.4747,
+        "median": 43.6549,
+        "max": 214.2833
+      }
+    },
+    "moving_avg_7": {
+      "wape": {
+        "count": 80,
+        "min": 0.2049,
+        "median": 0.9801,
+        "max": 5.9592
+      },
+      "mae": {
+        "count": 80,
+        "min": 6.0,
+        "median": 46.7381,
+        "max": 1114.3333
+      },
+      "bias": {
+        "count": 80,
+        "min": -685.7619,
+        "median": 3.2024,
+        "max": 82.1224
+      }
+    },
+    "naive_last": {
+      "wape": {
+        "count": 80,
+        "min": 0.5654,
+        "median": 1.2367,
+        "max": 5.6429
+      },
+      "mae": {
+        "count": 80,
+        "min": 5.0,
+        "median": 50.8333,
+        "max": 1885.0
+      },
+      "bias": {
+        "count": 80,
+        "min": -22.6667,
+        "median": 2.3428,
+        "max": 162.7143
+      }
+    },
+    "seasonal_naive_7": {
+      "wape": {
+        "count": 80,
+        "min": 0.2976,
+        "median": 1.1827,
+        "max": 10.2143
+      },
+      "mae": {
+        "count": 80,
+        "min": 10.6667,
+        "median": 54.1428,
+        "max": 1357.6667
+      },
+      "bias": {
+        "count": 80,
+        "min": -530.3333,
+        "median": 9.1095,
+        "max": 207.0
+      }
+    }
+  },
+  "worst_lightgbm_skus_by_wape": [
+    {
+      "horizon_days": 7,
+      "sku": "15036",
+      "demand_class": "regular",
+      "lightgbm_wape": 24.9353,
+      "best_model": "naive_last",
+      "total_test_demand": 14.0,
+      "n_test": 7
+    },
+    {
+      "horizon_days": 3,
+      "sku": "15036",
+      "demand_class": "regular",
+      "lightgbm_wape": 11.9192,
+      "best_model": "naive_last",
+      "total_test_demand": 9.0,
+      "n_test": 3
+    },
+    {
+      "horizon_days": 14,
+      "sku": "15036",
+      "demand_class": "regular",
+      "lightgbm_wape": 6.2067,
+      "best_model": "naive_last",
+      "total_test_demand": 157.0,
+      "n_test": 14
+    },
+    {
+      "horizon_days": 14,
+      "sku": "84755",
+      "demand_class": "regular",
+      "lightgbm_wape": 5.0981,
+      "best_model": "naive_last",
+      "total_test_demand": 184.0,
+      "n_test": 14
+    },
+    {
+      "horizon_days": 3,
+      "sku": "21212",
+      "demand_class": "regular",
+      "lightgbm_wape": 4.7974,
+      "best_model": "moving_avg_7",
+      "total_test_demand": 134.0,
+      "n_test": 3
+    },
+    {
+      "horizon_days": 14,
+      "sku": "84991",
+      "demand_class": "regular",
+      "lightgbm_wape": 4.255,
+      "best_model": "naive_last",
+      "total_test_demand": 235.0,
+      "n_test": 14
+    },
+    {
+      "horizon_days": 7,
+      "sku": "84568",
+      "demand_class": "intermittent",
+      "lightgbm_wape": 3.1641,
+      "best_model": "croston_sba",
+      "total_test_demand": 125.0,
+      "n_test": 7
+    },
+    {
+      "horizon_days": 3,
+      "sku": "22616",
+      "demand_class": "regular",
+      "lightgbm_wape": 3.1065,
+      "best_model": "seasonal_naive_7",
+      "total_test_demand": 55.0,
+      "n_test": 3
+    },
+    {
+      "horizon_days": 30,
+      "sku": "15036",
+      "demand_class": "regular",
+      "lightgbm_wape": 2.9779,
+      "best_model": "croston_sba",
+      "total_test_demand": 548.0,
+      "n_test": 30
+    },
+    {
+      "horizon_days": 7,
+      "sku": "84991",
+      "demand_class": "regular",
+      "lightgbm_wape": 2.8354,
+      "best_model": "moving_avg_7",
+      "total_test_demand": 110.0,
+      "n_test": 7
+    }
+  ],
+  "best_lightgbm_skus_by_wape": [
+    {
+      "horizon_days": 3,
+      "sku": "17003",
+      "demand_class": "intermittent",
+      "lightgbm_wape": 0.1451,
+      "best_model": "lightgbm",
+      "total_test_demand": 260.0,
+      "n_test": 3
+    },
+    {
+      "horizon_days": 3,
+      "sku": "22492",
+      "demand_class": "regular",
+      "lightgbm_wape": 0.2653,
+      "best_model": "lightgbm",
+      "total_test_demand": 216.0,
+      "n_test": 3
+    },
+    {
+      "horizon_days": 3,
+      "sku": "22178",
+      "demand_class": "regular",
+      "lightgbm_wape": 0.5135,
+      "best_model": "seasonal_naive_7",
+      "total_test_demand": 205.0,
+      "n_test": 3
+    },
+    {
+      "horizon_days": 7,
+      "sku": "22178",
+      "demand_class": "regular",
+      "lightgbm_wape": 0.5288,
+      "best_model": "seasonal_naive_7",
+      "total_test_demand": 806.0,
+      "n_test": 7
+    },
+    {
+      "horizon_days": 7,
+      "sku": "84879",
+      "demand_class": "regular",
+      "lightgbm_wape": 0.562,
+      "best_model": "lightgbm",
+      "total_test_demand": 738.0,
+      "n_test": 7
+    },
+    {
+      "horizon_days": 14,
+      "sku": "22178",
+      "demand_class": "regular",
+      "lightgbm_wape": 0.6178,
+      "best_model": "seasonal_naive_7",
+      "total_test_demand": 1441.0,
+      "n_test": 14
+    },
+    {
+      "horizon_days": 30,
+      "sku": "22197",
+      "demand_class": "regular",
+      "lightgbm_wape": 0.6302,
+      "best_model": "lightgbm",
+      "total_test_demand": 14468.0,
+      "n_test": 30
+    },
+    {
+      "horizon_days": 14,
+      "sku": "22197",
+      "demand_class": "regular",
+      "lightgbm_wape": 0.6747,
+      "best_model": "lightgbm",
+      "total_test_demand": 7778.0,
+      "n_test": 14
+    },
+    {
+      "horizon_days": 14,
+      "sku": "84879",
+      "demand_class": "regular",
+      "lightgbm_wape": 0.7172,
+      "best_model": "lightgbm",
+      "total_test_demand": 1633.0,
+      "n_test": 14
+    },
+    {
+      "horizon_days": 7,
+      "sku": "22197",
+      "demand_class": "regular",
+      "lightgbm_wape": 0.7247,
+      "best_model": "lightgbm",
+      "total_test_demand": 4569.0,
+      "n_test": 7
+    }
+  ]
+}

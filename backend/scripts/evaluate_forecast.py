@@ -93,12 +93,13 @@ def _evaluate_sku(
     series: pd.Series,
     model,
     feature_columns,
+    horizon: int = HORIZON,
 ) -> Optional[dict]:
-    if len(series) < MIN_HISTORY_DAYS:
+    if len(series) < max(MIN_HISTORY_DAYS, horizon + 14):
         return None
 
-    train = series.iloc[:-HORIZON]
-    test = series.iloc[-HORIZON:]
+    train = series.iloc[:-horizon]
+    test = series.iloc[-horizon:]
     if len(test) == 0:
         return None
 

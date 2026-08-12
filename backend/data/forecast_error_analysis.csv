@@ -1,0 +1,16 @@
+model,metric,count,min,median,max
+croston_sba,wape,80,0.1954,1.0005,8.9351
+croston_sba,mae,80,8.4006,44.3261,1040.0841
+croston_sba,bias,80,-781.5993,6.974,80.4593
+lightgbm,wape,80,0.1451,1.4149,24.9353
+lightgbm,mae,80,12.5776,65.8381,983.6748
+lightgbm,bias,80,-954.4747,43.6549,214.2833
+moving_avg_7,wape,80,0.2049,0.9801,5.9592
+moving_avg_7,mae,80,6.0,46.7381,1114.3333
+moving_avg_7,bias,80,-685.7619,3.2024,82.1224
+naive_last,wape,80,0.5654,1.2367,5.6429
+naive_last,mae,80,5.0,50.8333,1885.0
+naive_last,bias,80,-22.6667,2.3428,162.7143
+seasonal_naive_7,wape,80,0.2976,1.1827,10.2143
+seasonal_naive_7,mae,80,10.6667,54.1428,1357.6667
+seasonal_naive_7,bias,80,-530.3333,9.1095,207.0
