@@ -277,6 +277,7 @@ class DecisionBlock(BaseModel):
     inventory_gap: float       # max(0, reorder_point - current_stock)
     why: str                   # human-readable one-liner
     constraints: dict = Field(default_factory=dict)
+    uncertainty: dict = Field(default_factory=dict)
 
 
 class AnalyzeResponse(BaseModel):

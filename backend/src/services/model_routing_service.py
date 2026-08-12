@@ -278,7 +278,7 @@ class ModelRoutingService:
         forecast_horizon: int,
         as_of_date: date,
     ) -> list[MethodPerformance]:
-        payload = self._offline_payload()
+        payload = self._offline_payload(forecast_horizon)
         if not payload or payload.get("horizon_days") != forecast_horizon:
             return []
         generated_at = self._parse_datetime(payload.get("generated_at"))
@@ -300,7 +300,7 @@ class ModelRoutingService:
         forecast_horizon: int,
         as_of_date: date,
     ) -> list[MethodPerformance]:
-        payload = self._offline_payload()
+        payload = self._offline_payload(forecast_horizon)
         if not payload or payload.get("horizon_days") != forecast_horizon:
             return []
         generated_at = self._parse_datetime(payload.get("generated_at"))
@@ -316,15 +316,33 @@ class ModelRoutingService:
             evidence_level="pattern",
         )
 
-    def _offline_payload(self) -> dict[str, Any] | None:
+    def _offline_payload(self, forecast_horizon: int | None = None) -> dict[str, Any] | None:
         if self.offline_evaluation_path is None or not self.offline_evaluation_path.exists():
             return None
         try:
             with self.offline_evaluation_path.open() as fh:
-                return json.load(fh)
+                payload = json.load(fh)
         except Exception as exc:  # noqa: BLE001 - evidence is optional
             logger.warning("Offline routing evidence unreadable: %s", exc)
             return None
+        if forecast_horizon is not None:
+            horizons = payload.get("horizons")
+            if isinstance(horizons, dict):
+                matched = horizons.get(str(forecast_horizon))
+                if isinstance(matched, dict):
+                    return matched
+
+            sibling = self.offline_evaluation_path.with_name("forecast_evaluation_horizons.json")
+            if sibling.exists():
+                try:
+                    with sibling.open() as fh:
+                        multi_payload = json.load(fh)
+                    matched = (multi_payload.get("horizons") or {}).get(str(forecast_horizon))
+                    if isinstance(matched, dict):
+                        return matched
+                except Exception as exc:  # noqa: BLE001 - optional bootstrap evidence
+                    logger.warning("Multi-horizon offline evidence unreadable: %s", exc)
+        return payload
 
     def _offline_metrics_to_performance(
         self,

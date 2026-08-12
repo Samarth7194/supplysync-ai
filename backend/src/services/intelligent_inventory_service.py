@@ -3,7 +3,7 @@
 import logging
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Tuple
 from services.adaptive_forecasting_service import adaptive_forecast, get_sku_classification_metadata
 from inventory.reorder_point import compute_reorder_decision
 from inventory.business_constraints import (
@@ -55,6 +55,8 @@ class IntelligentInventoryService:
         risk_appetite: str = "moderate",
         supplier_constraints: Optional[SupplierConstraints] = None,
         routing_service=None,
+        uncertainty_service: Any | None = None,
+        policy_source: str | None = None,
     ) -> Dict:
         """
         Get comprehensive reorder decision with adaptive forecasting, dynamic safety stock, uncertainty awareness, and business constraints.
@@ -119,6 +121,16 @@ class IntelligentInventoryService:
         # 4. Dynamic safety stock calculation
         dynamic_safety_stock = None
         sigma_fallback = demand_history.std()
+        uncertainty_metadata = {
+            "source": "historical_demand_std",
+            "sigma": round(float(sigma_fallback) if pd.notna(sigma_fallback) else 0.0, 6),
+            "sample_count": 0,
+            "lookback_days": None,
+            "fallback_used": True,
+            "method": forecast_method,
+            "horizon_days": lead_time_days,
+            "demand_pattern": demand_pattern,
+        }
         
         if forecast_history is not None and len(forecast_history) > 0:
             try:
@@ -137,9 +149,31 @@ class IntelligentInventoryService:
                 )
                 
                 sigma_fallback = rolling_sigma
-                
+                uncertainty_metadata.update(
+                    {
+                        "source": "rolling_forecast_residuals",
+                        "sigma": round(float(rolling_sigma), 6),
+                        "sample_count": int(len(forecast_history)),
+                        "fallback_used": False,
+                    }
+                )
+
             except Exception as e:
                 logger.warning("Could not compute dynamic safety stock for %s: %s", sku, e)
+
+        if dynamic_safety_stock is None and uncertainty_service is not None:
+            try:
+                estimate = uncertainty_service.select_sigma(
+                    sku_code=sku,
+                    forecast_method=forecast_method,
+                    demand_pattern=demand_pattern,
+                    horizon_days=lead_time_days,
+                    historical_sigma=float(sigma_fallback) if pd.notna(sigma_fallback) else 0.0,
+                )
+                sigma_fallback = estimate.sigma
+                uncertainty_metadata = estimate.as_dict()
+            except Exception as e:
+                logger.warning("Residual uncertainty unavailable for %s: %s", sku, e)
         
         # 5. Compute base reorder decision
         base_decision = compute_reorder_decision(
@@ -167,8 +201,14 @@ class IntelligentInventoryService:
             # Use default constraints based on demand pattern
             defaults = get_default_supplier_constraints()
             supplier_constraints = defaults.get(demand_pattern, SupplierConstraints())
+            resolved_policy_source = "pattern_default"
+        else:
+            resolved_policy_source = policy_source or "sku_policy"
         
         constrained_decision = apply_business_constraints(final_decision, supplier_constraints)
+        constrained_decision.setdefault("business_constraints", {})
+        constrained_decision["business_constraints"]["policy_source"] = resolved_policy_source
+        constrained_decision["uncertainty"] = uncertainty_metadata
         
         # 8. Add intelligence metadata
         constrained_decision.update({
@@ -183,6 +223,7 @@ class IntelligentInventoryService:
                     "highly_intermittent_skus": "Use conservative forecast with 50% buffer"
                 },
                 "safety_stock_approach": "dynamic" if dynamic_safety_stock is not None else "traditional",
+                "uncertainty_source": uncertainty_metadata.get("source"),
                 "uncertainty_quantification": prediction_intervals is not None,
                 "risk_appetite": risk_appetite,
                 "business_constraints_applied": True

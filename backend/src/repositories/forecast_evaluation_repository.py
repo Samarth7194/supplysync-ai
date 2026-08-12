@@ -56,6 +56,47 @@ class ForecastEvaluationRepository:
         self.session.flush()
         return evaluation
 
+    def evaluated_prediction_logs(
+        self,
+        *,
+        horizon_days: int,
+        generated_after: datetime | None = None,
+        sku_code: str | None = None,
+        forecast_method: str | None = None,
+        demand_class: str | None = None,
+        limit: int = 500,
+    ) -> list[PredictionLog]:
+        """Return prediction logs that already have completed evaluations.
+
+        This deliberately reads through ``forecast_evaluations`` rather than
+        raw ``prediction_logs`` so uncertainty estimates only use predictions
+        whose horizon has completed and whose actuals were resolved by
+        ``ForecastEvaluationService``.
+        """
+        limit = max(1, min(int(limit), 5000))
+        stmt = (
+            select(PredictionLog)
+            .join(ForecastEvaluation, ForecastEvaluation.prediction_log_id == PredictionLog.id)
+            .options(selectinload(PredictionLog.analysis_run))
+            .where(ForecastEvaluation.evaluation_scope == "logged_prediction")
+            .where(ForecastEvaluation.horizon_days == horizon_days)
+            .where(PredictionLog.forecast_horizon_days == horizon_days)
+            .where(PredictionLog.forecast_daily.is_not(None))
+            .order_by(ForecastEvaluation.generated_at.desc().nullslast(), PredictionLog.predicted_at.desc())
+            .limit(limit)
+        )
+        if generated_after is not None:
+            stmt = stmt.where(ForecastEvaluation.generated_at.is_not(None))
+            stmt = stmt.where(ForecastEvaluation.generated_at >= generated_after)
+        if sku_code is not None:
+            stmt = stmt.where(PredictionLog.sku_code == sku_code)
+        if forecast_method is not None:
+            stmt = stmt.where(PredictionLog.forecast_method == forecast_method)
+        if demand_class is not None:
+            stmt = stmt.where(ForecastEvaluation.demand_class == demand_class)
+
+        return list(self.session.scalars(stmt))
+
     def logged_method_performance_for_sku(
         self,
         *,

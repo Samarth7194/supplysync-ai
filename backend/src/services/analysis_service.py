@@ -23,8 +23,10 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from repositories.analysis_repository import AnalysisRepository, serialize_analysis_runs
 from repositories.forecast_evaluation_repository import ForecastEvaluationRepository
+from inventory.business_constraints import SupplierConstraints
 from services.model_routing_service import ModelRoutingService
 from services.model_service import ModelService
+from services.forecast_uncertainty_service import ForecastUncertaintyService
 
 logger = logging.getLogger(__name__)
 
@@ -85,6 +87,7 @@ class DecisionBlockData:
     inventory_gap: float
     why: str
     constraints: dict[str, Any]
+    uncertainty: dict[str, Any]
 
 
 @dataclass(frozen=True)
@@ -160,15 +163,16 @@ class AnalysisService:
             raise AnalysisServiceUnavailableError("Inventory service unavailable")
 
         demand_series, demand_source = self._resolve_demand(request)
+        policy = self._policy_for_request(request)
         lead_time_days = (
             int(request.lead_time_days)
             if getattr(request, "lead_time_days", None)
-            else self.settings.inventory.default_lead_time_days
+            else int(policy.get("lead_time_days") or self.settings.inventory.default_lead_time_days)
         )
         service_level = (
             float(request.service_level)
             if getattr(request, "service_level", None)
-            else self.settings.inventory.default_service_level
+            else float(policy.get("service_level") or self.settings.inventory.default_service_level)
         )
 
         try:
@@ -179,7 +183,12 @@ class AnalysisService:
                 lead_time_days=lead_time_days,
                 service_level=service_level,
                 routing_service=self._routing_service(),
+                supplier_constraints=policy.get("supplier_constraints"),
+                policy_source=policy.get("policy_source"),
+                uncertainty_service=self._uncertainty_service(),
             )
+            decision.setdefault("business_constraints", {})
+            decision["business_constraints"].setdefault("policy_source", policy.get("policy_source", "pattern_default"))
         except Exception as exc:  # noqa: BLE001 - preserve API error behavior at boundary
             raise AnalysisExecutionError(f"Analysis failed for SKU {request.sku}: {exc}") from exc
 
@@ -257,6 +266,7 @@ class AnalysisService:
         full_horizon_forecast = self._full_horizon_forecast(decision, lead_time_days)
         inventory_gap = max(0.0, reorder_point - float(request.current_stock))
         constraints = self._constraint_metadata(decision, inventory_gap)
+        uncertainty = self._uncertainty_metadata(decision, demand_series)
 
         decision_block = DecisionBlockData(
             lead_time_days=lead_time_days,
@@ -277,6 +287,7 @@ class AnalysisService:
                 constraints=constraints,
             ),
             constraints=constraints,
+            uncertainty=uncertainty,
         )
 
         demand_pattern = decision.get("intelligence", {}).get("demand_pattern", "unknown")
@@ -355,12 +366,29 @@ class AnalysisService:
             "moq": constraints.get("moq"),
             "order_multiple": constraints.get("order_multiple"),
             "max_order_quantity": max_order_quantity,
+            "policy_source": constraints.get("policy_source", "pattern_default"),
             "constraints_applied": constraints_applied,
             "moq_applied": any(item.startswith("MOQ") for item in constraints_applied),
             "order_multiple_applied": any("multiple" in item.lower() for item in constraints_applied),
             "max_order_cap_applied": any("capped at maximum" in item.lower() for item in constraints_applied),
             "constrained": raw_qty != final_qty,
             "remaining_gap_after_order": round(max(0.0, float(inventory_gap) - final_qty), 2),
+        }
+
+    @staticmethod
+    def _uncertainty_metadata(decision: dict[str, Any], demand_series: pd.Series) -> dict[str, Any]:
+        metadata = dict(decision.get("uncertainty") or {})
+        if metadata:
+            return metadata
+        sigma = float(demand_series.std()) if len(demand_series) > 1 else 0.0
+        if not np.isfinite(sigma):
+            sigma = 0.0
+        return {
+            "source": "historical_demand_std",
+            "sigma": round(sigma, 6),
+            "sample_count": 0,
+            "lookback_days": None,
+            "fallback_used": True,
         }
 
     def _model_info_for_method(self, method: str) -> ModelInfoData:
@@ -722,6 +750,46 @@ class AnalysisService:
             forecast_evaluation_repository=repository,
             offline_evaluation_path=self.backend_dir / "data" / "forecast_evaluation.json",
         )
+
+    def _uncertainty_service(self) -> ForecastUncertaintyService | None:
+        if self.analysis_repository is None or self.data_service is None:
+            return None
+        forecasting_settings = getattr(self.settings, "forecasting", None)
+        return ForecastUncertaintyService(
+            repository=ForecastEvaluationRepository(self.analysis_repository.session),
+            data_service=self.data_service,
+            min_residual_observations=int(
+                getattr(forecasting_settings, "uncertainty_min_residual_observations", 30)
+            ),
+            lookback_days=int(getattr(forecasting_settings, "uncertainty_residual_lookback_days", 365)),
+        )
+
+    def _policy_for_request(self, request: Any) -> dict[str, Any]:
+        if self.analysis_repository is None:
+            return {"policy_source": "pattern_default", "supplier_constraints": None}
+        try:
+            policy = self.analysis_repository.active_inventory_policy_for_sku(request.sku)
+        except SQLAlchemyError as exc:
+            self.analysis_repository.session.rollback()
+            logger.exception(
+                "Inventory policy lookup failed",
+                extra={"operation": "active_inventory_policy_for_sku", "sku": request.sku},
+            )
+            raise AnalysisExecutionError("Inventory policy persistence is unavailable.") from exc
+        if policy is None:
+            return {"policy_source": "pattern_default", "supplier_constraints": None}
+        return {
+            "policy_source": "sku_policy",
+            "policy_id": policy.id,
+            "lead_time_days": policy.lead_time_days,
+            "service_level": float(policy.service_level),
+            "supplier_constraints": SupplierConstraints(
+                moq=int(policy.moq),
+                order_multiple=int(policy.order_multiple),
+                max_order_quantity=int(policy.max_order_quantity) if policy.max_order_quantity is not None else None,
+                lead_time_days=int(policy.lead_time_days),
+            ),
+        }
 
     @staticmethod
     def _routing_reason(routing: dict[str, Any] | None) -> str | None:

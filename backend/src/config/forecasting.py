@@ -16,6 +16,8 @@ class ForecastingSettings:
     routing_min_evaluation_points: int
     routing_min_relative_improvement: float
     routing_evidence_lookback_days: int
+    uncertainty_min_residual_observations: int
+    uncertainty_residual_lookback_days: int
 
 
 def load_forecasting_settings() -> ForecastingSettings:
@@ -23,6 +25,8 @@ def load_forecasting_settings() -> ForecastingSettings:
     min_points = env_int("ROUTING_MIN_EVALUATION_POINTS", 30)
     min_improvement = env_float("ROUTING_MIN_RELATIVE_IMPROVEMENT", 0.05)
     lookback_days = env_int("ROUTING_EVIDENCE_LOOKBACK_DAYS", 365)
+    uncertainty_min_residuals = env_int("UNCERTAINTY_MIN_RESIDUAL_OBSERVATIONS", 30)
+    uncertainty_lookback_days = env_int("UNCERTAINTY_RESIDUAL_LOOKBACK_DAYS", 365)
 
     if primary_metric not in {"wape", "mase", "mae", "rmse"}:
         raise ValueError("ROUTING_PRIMARY_METRIC must be one of: wape, mase, mae, rmse.")
@@ -32,6 +36,10 @@ def load_forecasting_settings() -> ForecastingSettings:
         raise ValueError("ROUTING_MIN_RELATIVE_IMPROVEMENT must satisfy 0 <= value <= 1.")
     if lookback_days < 1:
         raise ValueError("ROUTING_EVIDENCE_LOOKBACK_DAYS must be greater than or equal to 1.")
+    if uncertainty_min_residuals < 2:
+        raise ValueError("UNCERTAINTY_MIN_RESIDUAL_OBSERVATIONS must be greater than or equal to 2.")
+    if uncertainty_lookback_days < 1:
+        raise ValueError("UNCERTAINTY_RESIDUAL_LOOKBACK_DAYS must be greater than or equal to 1.")
 
     return ForecastingSettings(
         model_path=env_path("MODEL_PATH", BACKEND_DIR / "saved_models"),
@@ -40,4 +48,6 @@ def load_forecasting_settings() -> ForecastingSettings:
         routing_min_evaluation_points=min_points,
         routing_min_relative_improvement=min_improvement,
         routing_evidence_lookback_days=lookback_days,
+        uncertainty_min_residual_observations=uncertainty_min_residuals,
+        uncertainty_residual_lookback_days=uncertainty_lookback_days,
     )

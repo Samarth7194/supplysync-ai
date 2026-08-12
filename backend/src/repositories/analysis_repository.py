@@ -8,7 +8,7 @@ from typing import Any
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
-from db.models import AnalysisRun, ModelArtifact, PredictionLog, Sku
+from db.models import AnalysisRun, InventoryPolicy, ModelArtifact, PredictionLog, Sku
 
 
 class AnalysisRepository:
@@ -31,6 +31,19 @@ class AnalysisRepository:
 
     def get_sku_id(self, sku_code: str) -> int | None:
         stmt = select(Sku.id).where(Sku.sku_code == sku_code)
+        return self.session.scalar(stmt)
+
+    def active_inventory_policy_for_sku(self, sku_code: str) -> InventoryPolicy | None:
+        """Return the most recent active SKU policy, if one has been configured."""
+        stmt = (
+            select(InventoryPolicy)
+            .join(Sku)
+            .where(Sku.sku_code == sku_code)
+            .where(Sku.is_active.is_(True))
+            .where(InventoryPolicy.is_active.is_(True))
+            .order_by(InventoryPolicy.effective_from.desc(), InventoryPolicy.id.desc())
+            .limit(1)
+        )
         return self.session.scalar(stmt)
 
     def get_or_create_model_artifact(self, values: Mapping[str, Any]) -> ModelArtifact:
