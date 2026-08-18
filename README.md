@@ -8,6 +8,32 @@ Built on the [UCI Online Retail II](https://archive.ics.uci.edu/dataset/502/onli
 
 ---
 
+
+## Production Deployment
+
+Status: **Live**
+
+| Surface | Provider | URL / Notes |
+|---|---|---|
+| Live application | Vercel | https://supplysync-ai.vercel.app/ |
+| Backend API | Render | https://supplysync-ai.onrender.com |
+| Health endpoint | Render | https://supplysync-ai.onrender.com/health |
+| Database | Neon PostgreSQL | Alembic-managed PostgreSQL schema |
+| Runtime ML artifacts | GitHub Releases | `v1.0-artifacts` bundle |
+
+The deployed stack is a Next.js frontend on Vercel calling a FastAPI backend on
+Render, backed by Neon PostgreSQL. Runtime model/data artifacts are intentionally
+not committed to Git: the trained LightGBM `.pkl` file and processed demand
+parquet are supplied through the versioned GitHub Release artifact bundle.
+
+The live decision workflow uses the same project components documented below:
+LightGBM forecasting, Croston-SBA/statistical fallbacks, demand-pattern routing,
+reorder point + safety-stock inventory logic, residual forecast-error uncertainty,
+and forecast-evaluation/evidence-routing infrastructure. Free-tier hosting may
+cold start after inactivity.
+
+---
+
 ## Demo quickstart
 
 Place `online_retail_II.csv` at `data/raw/online_retail_II.csv` (see [UCI](https://archive.ics.uci.edu/dataset/502/online+retail+ii)), then:
@@ -43,7 +69,7 @@ Measured via `scripts/compute_kpis.py` on the top-10 SKUs by total demand, simul
 
 - **37.8% cost reduction** vs. a naive fixed-threshold reorder policy
 - **95.7% fill rate** across the simulated SKUs
-- **103 passing backend tests** covering forecasting routing, inventory math, evaluation, simulation, API contracts, provenance, auth, and cross-SKU generalization.
+- **169 passing backend tests** with 6 intentional skips, covering forecasting routing, inventory math, evaluation, simulation, API contracts, provenance, auth, persistence, and cross-SKU generalization.
 
 > These numbers are specific to UCI Online Retail II's top-10 SKUs. For a fair read on whether this approach fits **your** data, see [`docs/bring-your-own-data.md`](docs/bring-your-own-data.md) and run `python backend/scripts/evaluate_cross_sku.py`.
 
@@ -88,7 +114,7 @@ The project is deliberately scoped as a **portfolio-grade demo**: it runs on a s
 | Modeling | LightGBM, scikit-learn, pandas, numpy, scipy |
 | API | FastAPI, Uvicorn, Pydantic |
 | Frontend | Next.js 16 (App Router), React 19, Tailwind CSS, Recharts |
-| Data | UCI Online Retail II (CSV), processed to Parquet |
+| Data / persistence | UCI Online Retail II (CSV), processed to Parquet; PostgreSQL via SQLAlchemy/Alembic |
 | Tooling | pytest (backend), TypeScript + ESLint (frontend), Docker Compose |
 
 ---
@@ -561,7 +587,7 @@ Split explicitly so nothing is oversold:
 
 This is a **portfolio-grade demo**, not a production ERP. Things that are honest to know up-front:
 
-- **Stock persistence is mid-migration.** The current-stock input is real and interactive, and edited values now go through server-side stock endpoints. The frontend still keeps a browser fallback for offline/error states while the PostgreSQL migration matures.
+- **Stock persistence is live but demo-scoped.** Edited stock values go through server-side stock endpoints backed by PostgreSQL. The frontend still keeps a browser fallback for offline/error states, and there is no ERP/WMS integration.
 - **Only 20 SKUs in training.** The full UCI dataset has ~4,900 SKUs; we train on the top-20 by total demand to keep the demo fast. Cross-SKU evaluation covers generalization across that set but doesn't extrapolate to cold-start products.
 - **Headline metrics are dataset-specific.** The 37.8% cost reduction / 95.7% fill rate come from simulating policies on UCI Online Retail II's top-10 SKUs. Expect different numbers on your data — that's why the cross-SKU and custom-dataset evaluation paths exist.
 - **The trained model and processed parquet aren't committed** (only the metadata JSON is). Run `python scripts/bootstrap.py` once after cloning to generate both. Until they exist, the regular-demand path falls back to `simple_average` with `forecast_source="rule_based_estimate"`, `/api/skus*` return 503 with a `hint`, and `/health` reports `model_loaded: false` / `data_available: false`.
@@ -573,7 +599,7 @@ This is a **portfolio-grade demo**, not a production ERP. Things that are honest
 
 ## Future Improvements
 
-- Run PostgreSQL as the normal development path, keep migrations validated in CI, and decide whether old local SQLite analysis snapshots need a one-time import.
+- Keep PostgreSQL migrations validated in CI and decide whether old local SQLite analysis snapshots need a one-time import.
 - UI upload flow for bring-your-own-data (currently CLI-only).
 - Probabilistic forecasting (quantile regression or conformal intervals) end-to-end, replacing the current residual-based approximation.
 - Per-SKU model selection via cross-validated AIC/MAPE rather than a sparsity threshold.
