@@ -12,7 +12,7 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test": "tsc --noEmit && eslint",
+    "test": "node --test --experimental-strip-types tests/*.test.mts && tsc --noEmit && eslint",
     "clean": "rimraf .next out tsconfig.tsbuildinfo"
   },
   "dependencies": {
