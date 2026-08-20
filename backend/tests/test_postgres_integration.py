@@ -23,7 +23,9 @@ from db.models import (
     ForecastEvaluation,
     InventoryPolicy,
     ModelArtifact,
+    ModelMonitoringSnapshot,
     PredictionLog,
+    RetrainingRun,
     Sku,
     StockLevel,
 )
@@ -59,6 +61,8 @@ def session():
 
 def _clean(session) -> None:
     for model in (
+        RetrainingRun,
+        ModelMonitoringSnapshot,
         ForecastEvaluation,
         PredictionLog,
         AnalysisRun,
@@ -155,6 +159,88 @@ def test_postgres_schema_supports_model_artifact_lifecycle(session):
     assert session.get(ModelArtifact, first.id).lifecycle_status == "retired"
     assert session.get(ModelArtifact, second.id).lifecycle_status == "active"
     assert repo.active_for_name("lightgbm_demand_forecast").id == second.id
+
+
+def test_postgres_schema_supports_model_monitoring_snapshots(session):
+    inspector = inspect(session.bind)
+    columns = {column["name"] for column in inspector.get_columns("model_monitoring_snapshots")}
+    assert {
+        "generated_at",
+        "model_artifact_id",
+        "model_name",
+        "model_version",
+        "window_type",
+        "window_size",
+        "evaluation_count",
+        "metric_wape",
+        "metric_mae",
+        "metric_rmse",
+        "metric_bias",
+        "metric_mase",
+        "residual_mean",
+        "residual_std",
+        "baseline_wape",
+        "baseline_provenance",
+        "wape_relative_change",
+        "bias_ratio",
+        "degradation_reason",
+        "degradation_message",
+        "consecutive_degradation_count",
+        "status",
+        "evidence_key",
+    }.issubset(columns)
+
+    foreign_keys = inspector.get_foreign_keys("model_monitoring_snapshots")
+    assert any(
+        fk["referred_table"] == "model_artifacts"
+        and fk["constrained_columns"] == ["model_artifact_id"]
+        for fk in foreign_keys
+    )
+
+    indexes = inspector.get_indexes("model_monitoring_snapshots")
+    assert any(
+        index["column_names"] == ["model_artifact_id", "generated_at"]
+        for index in indexes
+    )
+
+
+def test_postgres_schema_supports_retraining_runs(session):
+    inspector = inspect(session.bind)
+    columns = {column["name"] for column in inspector.get_columns("retraining_runs")}
+    assert {
+        "triggered_at",
+        "trigger_reason",
+        "status",
+        "baseline_model_artifact_id",
+        "source_monitoring_snapshot_id",
+        "new_evaluated_forecast_days",
+        "started_at",
+        "finished_at",
+        "candidate_model_artifact_id",
+        "promotion_recommended",
+        "failure_reason",
+        "evidence_key",
+        "created_at",
+        "updated_at",
+    }.issubset(columns)
+
+    foreign_keys = inspector.get_foreign_keys("retraining_runs")
+    assert any(
+        fk["referred_table"] == "model_artifacts"
+        and fk["constrained_columns"] == ["baseline_model_artifact_id"]
+        for fk in foreign_keys
+    )
+    assert any(
+        fk["referred_table"] == "model_monitoring_snapshots"
+        and fk["constrained_columns"] == ["source_monitoring_snapshot_id"]
+        for fk in foreign_keys
+    )
+
+    indexes = inspector.get_indexes("retraining_runs")
+    assert any(
+        index["column_names"] == ["status", "triggered_at"]
+        for index in indexes
+    )
 
 
 def test_analysis_repository_persists_relationships_and_recent_ordering(session):

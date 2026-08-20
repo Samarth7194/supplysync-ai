@@ -26,6 +26,18 @@ def test_settings_defaults(monkeypatch):
         "ROUTING_MIN_EVALUATION_POINTS",
         "ROUTING_MIN_RELATIVE_IMPROVEMENT",
         "ROUTING_EVIDENCE_LOOKBACK_DAYS",
+        "MODEL_MONITORING_ENABLED",
+        "MODEL_MONITORING_WINDOW_EVALUATIONS",
+        "MODEL_MONITORING_LOOKBACK_DAYS",
+        "MODEL_MONITORING_MIN_EVALUATIONS",
+        "MODEL_MONITORING_WAPE_WARNING_THRESHOLD",
+        "MODEL_MONITORING_WAPE_DEGRADATION_THRESHOLD",
+        "MODEL_MONITORING_BIAS_WARNING_RATIO",
+        "MODEL_MONITORING_DEGRADATION_CONSECUTIVE_RUNS",
+        "AUTO_RETRAIN_ENABLED",
+        "MODEL_RETRAIN_MIN_EVALUATED_FORECAST_DAYS",
+        "MODEL_RETRAIN_COOLDOWN_DAYS",
+        "MODEL_RETRAIN_REQUIRE_DEGRADED_STATUS",
     ):
         monkeypatch.delenv(name, raising=False)
 
@@ -37,6 +49,18 @@ def test_settings_defaults(monkeypatch):
     assert settings.forecasting.routing_min_evaluation_points == 30
     assert settings.forecasting.routing_min_relative_improvement == 0.05
     assert settings.forecasting.routing_evidence_lookback_days == 365
+    assert settings.forecasting.model_monitoring_enabled is True
+    assert settings.forecasting.model_monitoring_window_evaluations == 30
+    assert settings.forecasting.model_monitoring_lookback_days == 90
+    assert settings.forecasting.model_monitoring_min_evaluations == 30
+    assert settings.forecasting.model_monitoring_wape_warning_threshold == 0.15
+    assert settings.forecasting.model_monitoring_wape_degradation_threshold == 0.25
+    assert settings.forecasting.model_monitoring_bias_warning_ratio == 0.20
+    assert settings.forecasting.model_monitoring_degradation_consecutive_runs == 2
+    assert settings.forecasting.auto_retrain_enabled is False
+    assert settings.forecasting.model_retrain_min_evaluated_forecast_days == 100
+    assert settings.forecasting.model_retrain_cooldown_days == 14
+    assert settings.forecasting.model_retrain_require_degraded_status is True
     assert settings.database.database_url == f"sqlite:///{(BACKEND_DIR / 'data' / 'supplysync.db').as_posix()}"
     assert settings.app.allowed_origins == ["http://localhost:3000"]
     assert settings.inventory.default_lead_time_days == 7
@@ -65,6 +89,18 @@ def test_settings_parse_env_overrides(monkeypatch, tmp_path):
     monkeypatch.setenv("ROUTING_MIN_EVALUATION_POINTS", "50")
     monkeypatch.setenv("ROUTING_MIN_RELATIVE_IMPROVEMENT", "0.15")
     monkeypatch.setenv("ROUTING_EVIDENCE_LOOKBACK_DAYS", "90")
+    monkeypatch.setenv("MODEL_MONITORING_ENABLED", "false")
+    monkeypatch.setenv("MODEL_MONITORING_WINDOW_EVALUATIONS", "40")
+    monkeypatch.setenv("MODEL_MONITORING_LOOKBACK_DAYS", "120")
+    monkeypatch.setenv("MODEL_MONITORING_MIN_EVALUATIONS", "20")
+    monkeypatch.setenv("MODEL_MONITORING_WAPE_WARNING_THRESHOLD", "0.10")
+    monkeypatch.setenv("MODEL_MONITORING_WAPE_DEGRADATION_THRESHOLD", "0.30")
+    monkeypatch.setenv("MODEL_MONITORING_BIAS_WARNING_RATIO", "0.25")
+    monkeypatch.setenv("MODEL_MONITORING_DEGRADATION_CONSECUTIVE_RUNS", "3")
+    monkeypatch.setenv("AUTO_RETRAIN_ENABLED", "false")
+    monkeypatch.setenv("MODEL_RETRAIN_MIN_EVALUATED_FORECAST_DAYS", "140")
+    monkeypatch.setenv("MODEL_RETRAIN_COOLDOWN_DAYS", "7")
+    monkeypatch.setenv("MODEL_RETRAIN_REQUIRE_DEGRADED_STATUS", "true")
 
     settings = load_settings()
 
@@ -82,6 +118,18 @@ def test_settings_parse_env_overrides(monkeypatch, tmp_path):
     assert settings.forecasting.routing_min_evaluation_points == 50
     assert settings.forecasting.routing_min_relative_improvement == 0.15
     assert settings.forecasting.routing_evidence_lookback_days == 90
+    assert settings.forecasting.model_monitoring_enabled is False
+    assert settings.forecasting.model_monitoring_window_evaluations == 40
+    assert settings.forecasting.model_monitoring_lookback_days == 120
+    assert settings.forecasting.model_monitoring_min_evaluations == 20
+    assert settings.forecasting.model_monitoring_wape_warning_threshold == 0.10
+    assert settings.forecasting.model_monitoring_wape_degradation_threshold == 0.30
+    assert settings.forecasting.model_monitoring_bias_warning_ratio == 0.25
+    assert settings.forecasting.model_monitoring_degradation_consecutive_runs == 3
+    assert settings.forecasting.auto_retrain_enabled is False
+    assert settings.forecasting.model_retrain_min_evaluated_forecast_days == 140
+    assert settings.forecasting.model_retrain_cooldown_days == 7
+    assert settings.forecasting.model_retrain_require_degraded_status is True
 
 
 def test_settings_resolve_repo_root_style_backend_paths(monkeypatch):
@@ -141,4 +189,45 @@ def test_settings_invalid_routing_threshold_fails_fast(monkeypatch):
     monkeypatch.setenv("ROUTING_MIN_RELATIVE_IMPROVEMENT", "2")
 
     with pytest.raises(ValueError, match="ROUTING_MIN_RELATIVE_IMPROVEMENT"):
+        load_settings()
+
+
+def test_settings_invalid_monitoring_threshold_order_fails_fast(monkeypatch):
+    import pytest
+    from config.settings import load_settings
+
+    monkeypatch.setenv("MODEL_MONITORING_WAPE_WARNING_THRESHOLD", "0.30")
+    monkeypatch.setenv("MODEL_MONITORING_WAPE_DEGRADATION_THRESHOLD", "0.25")
+
+    with pytest.raises(ValueError, match="MODEL_MONITORING_WAPE_WARNING_THRESHOLD"):
+        load_settings()
+
+
+def test_settings_invalid_monitoring_consecutive_runs_fails_fast(monkeypatch):
+    import pytest
+    from config.settings import load_settings
+
+    monkeypatch.setenv("MODEL_MONITORING_DEGRADATION_CONSECUTIVE_RUNS", "0")
+
+    with pytest.raises(ValueError, match="MODEL_MONITORING_DEGRADATION_CONSECUTIVE_RUNS"):
+        load_settings()
+
+
+def test_settings_invalid_retraining_min_forecast_days_fails_fast(monkeypatch):
+    import pytest
+    from config.settings import load_settings
+
+    monkeypatch.setenv("MODEL_RETRAIN_MIN_EVALUATED_FORECAST_DAYS", "0")
+
+    with pytest.raises(ValueError, match="MODEL_RETRAIN_MIN_EVALUATED_FORECAST_DAYS"):
+        load_settings()
+
+
+def test_settings_invalid_retraining_cooldown_fails_fast(monkeypatch):
+    import pytest
+    from config.settings import load_settings
+
+    monkeypatch.setenv("MODEL_RETRAIN_COOLDOWN_DAYS", "-1")
+
+    with pytest.raises(ValueError, match="MODEL_RETRAIN_COOLDOWN_DAYS"):
         load_settings()

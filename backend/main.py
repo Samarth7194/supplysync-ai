@@ -7,9 +7,9 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
-from typing import List, Optional
+from typing import Literal, List, Optional
 
-from fastapi import Cookie, Depends, FastAPI, HTTPException, Response, Security
+from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Response, Security
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import APIKeyHeader
 from pydantic import BaseModel, Field
@@ -26,17 +26,24 @@ from config.settings import load_settings
 from dependencies.analysis import get_analysis_repository
 from dependencies.stock import get_stock_service
 from db.session import database_health
+from db.session import get_session
 from repositories.analysis_repository import AnalysisRepository
+from repositories.model_monitoring_repository import ModelMonitoringRepository
+from repositories.retraining_repository import RetrainingRepository
 from services.analysis_service import (
     AnalysisExecutionError,
     AnalysisService,
     AnalysisServiceUnavailableError,
 )
+from services.model_monitoring_service import ModelMonitoringService
+from services.retraining_decision_service import RetrainingDecisionService
 from services.stock_service import (
     InvalidStockLevelError,
     StockPersistenceUnavailableError,
     StockService,
 )
+from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.orm import Session
 from auth.session import (
     AuthConfig,
     COOKIE_NAME,
@@ -187,6 +194,32 @@ def get_analysis_service(
     )
 
 
+def get_model_monitoring_service(
+    session: Session = Depends(get_session),
+) -> ModelMonitoringService:
+    """Build the monitoring service for API requests without touching inference."""
+    return ModelMonitoringService(
+        repository=ModelMonitoringRepository(session),
+        settings=SETTINGS,
+        data_service=_data_service,
+        offline_evaluation_path=Path(__file__).resolve().parent / "data" / "forecast_evaluation.json",
+    )
+
+
+def get_retraining_decision_service(
+    session: Session = Depends(get_session),
+) -> RetrainingDecisionService:
+    """Build the retraining recommendation service.
+
+    Phase E only evaluates/persists recommendations when explicitly requested
+    by scripts. This dependency is read-only for the status API.
+    """
+    return RetrainingDecisionService(
+        repository=RetrainingRepository(session),
+        settings=SETTINGS,
+    )
+
+
 # --- Schemas ---
 
 class AnalyzeRequest(BaseModel):
@@ -245,6 +278,59 @@ class ModelInfo(BaseModel):
     dataset: Optional[str] = None
     evaluation_available: bool = False
     evaluation_generated_at: Optional[str] = None
+
+
+MonitoringStatus = Literal["unavailable", "insufficient_evidence", "stable", "warning", "degraded"]
+PersistedMonitoringStatus = Literal["insufficient_evidence", "stable", "warning", "degraded"]
+
+
+class ModelMonitoringSnapshotResponse(BaseModel):
+    model_artifact_id: Optional[int] = None
+    model_name: str
+    model_version: Optional[str] = None
+    lifecycle_status: Optional[str] = None
+    generated_at: Optional[str] = None
+    status: MonitoringStatus
+    degradation_reason: Optional[str] = None
+    degradation_message: Optional[str] = None
+    evaluation_count: int = 0
+    window_type: Optional[str] = None
+    window_size: Optional[int] = None
+    metric_wape: Optional[float] = None
+    metric_mae: Optional[float] = None
+    metric_rmse: Optional[float] = None
+    metric_bias: Optional[float] = None
+    metric_mase: Optional[float] = None
+    residual_mean: Optional[float] = None
+    residual_std: Optional[float] = None
+    baseline_wape: Optional[float] = None
+    baseline_provenance: Optional[str] = None
+    wape_relative_change: Optional[float] = None
+    bias_ratio: Optional[float] = None
+    consecutive_degradation_count: int = 0
+    created: Optional[bool] = None
+
+
+class ModelMonitoringHistoryResponse(BaseModel):
+    items: List[ModelMonitoringSnapshotResponse]
+    limit: int
+    count: int
+
+
+class ModelRetrainingStatusResponse(BaseModel):
+    recommended: bool
+    reason: str
+    message: str
+    latest_monitoring_status: Optional[MonitoringStatus] = None
+    new_evaluated_forecast_days: int
+    minimum_required: int
+    cooldown_days: int
+    cooldown_remaining_days: int
+    baseline_model: Optional[dict] = None
+    source_monitoring_snapshot_id: Optional[int] = None
+    last_retraining_attempt: Optional[str] = None
+    retraining_run_id: Optional[int] = None
+    automatic_execution_enabled: bool
 
 
 class ExplanationBlock(BaseModel):
@@ -489,6 +575,161 @@ async def model_info():
             "back to the 7-day moving average."
         ),
     }
+
+
+def _to_float(value) -> Optional[float]:
+    return float(value) if value is not None else None
+
+
+def _unavailable_monitoring_response() -> ModelMonitoringSnapshotResponse:
+    return ModelMonitoringSnapshotResponse(
+        model_name="lightgbm_demand_forecast",
+        status="unavailable",
+        degradation_reason="monitoring_unavailable",
+        degradation_message="No model monitoring snapshot has been created yet.",
+        baseline_provenance="unavailable",
+    )
+
+
+def _monitoring_response(snapshot, *, created: Optional[bool] = None) -> ModelMonitoringSnapshotResponse:
+    artifact = getattr(snapshot, "model_artifact", None)
+    return ModelMonitoringSnapshotResponse(
+        model_artifact_id=snapshot.model_artifact_id,
+        model_name=snapshot.model_name,
+        model_version=snapshot.model_version,
+        lifecycle_status=getattr(artifact, "lifecycle_status", None),
+        generated_at=snapshot.generated_at.isoformat() if snapshot.generated_at else None,
+        status=snapshot.status,
+        degradation_reason=snapshot.degradation_reason,
+        degradation_message=snapshot.degradation_message,
+        evaluation_count=int(snapshot.evaluation_count or 0),
+        window_type=snapshot.window_type,
+        window_size=snapshot.window_size,
+        metric_wape=_to_float(snapshot.metric_wape),
+        metric_mae=_to_float(snapshot.metric_mae),
+        metric_rmse=_to_float(snapshot.metric_rmse),
+        metric_bias=_to_float(snapshot.metric_bias),
+        metric_mase=_to_float(snapshot.metric_mase),
+        residual_mean=_to_float(snapshot.residual_mean),
+        residual_std=_to_float(snapshot.residual_std),
+        baseline_wape=_to_float(snapshot.baseline_wape),
+        baseline_provenance=snapshot.baseline_provenance,
+        wape_relative_change=_to_float(snapshot.wape_relative_change),
+        bias_ratio=_to_float(snapshot.bias_ratio),
+        consecutive_degradation_count=int(snapshot.consecutive_degradation_count or 0),
+        created=created,
+    )
+
+
+def _retraining_status_response(decision) -> ModelRetrainingStatusResponse:
+    baseline_model = None
+    if decision.baseline_model_artifact_id is not None:
+        baseline_model = {
+            "artifact_id": decision.baseline_model_artifact_id,
+            "model_name": decision.baseline_model_name,
+            "model_version": decision.baseline_model_version,
+        }
+    return ModelRetrainingStatusResponse(
+        recommended=decision.recommended,
+        reason=decision.reason,
+        message=decision.message,
+        latest_monitoring_status=decision.latest_monitoring_status,
+        new_evaluated_forecast_days=decision.new_evaluated_forecast_days,
+        minimum_required=decision.minimum_required,
+        cooldown_days=decision.cooldown_days,
+        cooldown_remaining_days=decision.cooldown_remaining_days,
+        baseline_model=baseline_model,
+        source_monitoring_snapshot_id=decision.source_monitoring_snapshot_id,
+        last_retraining_attempt=(
+            decision.last_retraining_attempt_at.isoformat()
+            if decision.last_retraining_attempt_at is not None
+            else None
+        ),
+        retraining_run_id=decision.retraining_run.id if decision.retraining_run is not None else None,
+        automatic_execution_enabled=decision.automatic_execution_enabled,
+    )
+
+
+@app.get(
+    "/api/model-monitoring",
+    dependencies=[Depends(verify_api_key)],
+    response_model=ModelMonitoringSnapshotResponse,
+)
+async def current_model_monitoring(
+    monitoring_service: ModelMonitoringService = Depends(get_model_monitoring_service),
+):
+    """Return the latest model monitoring snapshot for the current model scope."""
+    try:
+        snapshot = monitoring_service.current_snapshot()
+    except SQLAlchemyError as exc:
+        logger.exception("Model monitoring lookup failed")
+        raise HTTPException(status_code=503, detail="Model monitoring persistence is unavailable.") from exc
+    if snapshot is None:
+        return _unavailable_monitoring_response()
+    return _monitoring_response(snapshot)
+
+
+@app.get(
+    "/api/model-monitoring/history",
+    dependencies=[Depends(verify_api_key)],
+    response_model=ModelMonitoringHistoryResponse,
+)
+async def model_monitoring_history(
+    limit: int = Query(20, ge=1, le=100),
+    model_artifact_id: Optional[int] = Query(None, ge=1),
+    status: Optional[PersistedMonitoringStatus] = None,
+    monitoring_service: ModelMonitoringService = Depends(get_model_monitoring_service),
+):
+    """Return recent monitoring snapshots, newest first."""
+    try:
+        rows = monitoring_service.snapshot_history(
+            limit=limit,
+            model_artifact_id=model_artifact_id,
+            status=status,
+        )
+    except SQLAlchemyError as exc:
+        logger.exception("Model monitoring history lookup failed")
+        raise HTTPException(status_code=503, detail="Model monitoring persistence is unavailable.") from exc
+    items = [_monitoring_response(row) for row in rows]
+    return ModelMonitoringHistoryResponse(items=items, limit=limit, count=len(items))
+
+
+@app.post(
+    "/api/model-monitoring/evaluate",
+    dependencies=[Depends(verify_api_key)],
+    response_model=ModelMonitoringSnapshotResponse,
+)
+async def evaluate_model_monitoring(
+    monitoring_service: ModelMonitoringService = Depends(get_model_monitoring_service),
+):
+    """Create or reuse one monitoring snapshot; does not retrain or promote."""
+    try:
+        result = monitoring_service.create_snapshot()
+    except SQLAlchemyError as exc:
+        logger.exception("Model monitoring evaluation failed")
+        raise HTTPException(status_code=503, detail="Model monitoring persistence is unavailable.") from exc
+    return _monitoring_response(result.snapshot, created=result.created)
+
+
+@app.get(
+    "/api/model-retraining/status",
+    dependencies=[Depends(verify_api_key)],
+    response_model=ModelRetrainingStatusResponse,
+)
+async def model_retraining_status(
+    retraining_service: RetrainingDecisionService = Depends(get_retraining_decision_service),
+):
+    """Return read-only retraining recommendation status.
+
+    This endpoint does not start training, register candidates, promote models,
+    or mutate the recommendation table.
+    """
+    try:
+        decision = retraining_service.evaluate(persist_recommendation=False)
+    except SQLAlchemyError as exc:
+        logger.exception("Retraining recommendation lookup failed")
+        raise HTTPException(status_code=503, detail="Retraining recommendation persistence is unavailable.") from exc
+    return _retraining_status_response(decision)
 
 
 _KPI_INTERPRETATION = {
