@@ -17,6 +17,7 @@ from sqlalchemy import (
     Date,
     DateTime,
     ForeignKey,
+    Index,
     Integer,
     JSON,
     Numeric,
@@ -247,3 +248,99 @@ class ModelArtifact(Base):
 
     forecast_evaluations: Mapped[list[ForecastEvaluation]] = relationship(back_populates="model_artifact")
     prediction_logs: Mapped[list[PredictionLog]] = relationship(back_populates="model_artifact")
+    monitoring_snapshots: Mapped[list["ModelMonitoringSnapshot"]] = relationship(back_populates="model_artifact")
+    retraining_runs_as_baseline: Mapped[list["RetrainingRun"]] = relationship(
+        back_populates="baseline_model_artifact",
+        foreign_keys="RetrainingRun.baseline_model_artifact_id",
+    )
+    retraining_runs_as_candidate: Mapped[list["RetrainingRun"]] = relationship(
+        back_populates="candidate_model_artifact",
+        foreign_keys="RetrainingRun.candidate_model_artifact_id",
+    )
+
+
+class ModelMonitoringSnapshot(Base):
+    __tablename__ = "model_monitoring_snapshots"
+    __table_args__ = (
+        CheckConstraint("window_size > 0", name="ck_model_monitoring_window_size_positive"),
+        CheckConstraint("evaluation_count >= 0", name="ck_model_monitoring_evaluation_count_non_negative"),
+        CheckConstraint(
+            "status in ('insufficient_evidence', 'stable', 'warning', 'degraded')",
+            name="ck_model_monitoring_status",
+        ),
+        CheckConstraint("consecutive_degradation_count >= 0", name="ck_model_monitoring_consecutive_non_negative"),
+        UniqueConstraint("evidence_key", name="uq_model_monitoring_snapshots_evidence_key"),
+        Index("ix_model_monitoring_artifact_generated", "model_artifact_id", "generated_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    generated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, index=True)
+    model_artifact_id: Mapped[int | None] = mapped_column(ForeignKey("model_artifacts.id"), index=True)
+    model_name: Mapped[str] = mapped_column(String(128), nullable=False, index=True)
+    model_version: Mapped[str | None] = mapped_column(String(128))
+    window_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    window_size: Mapped[int] = mapped_column(Integer, nullable=False)
+    evaluation_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    metric_wape: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    metric_mae: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    metric_rmse: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    metric_bias: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    metric_mase: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    residual_mean: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    residual_std: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    baseline_wape: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    baseline_provenance: Mapped[str] = mapped_column(String(32), nullable=False, default="unavailable", server_default="unavailable")
+    wape_relative_change: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    bias_ratio: Mapped[Decimal | None] = mapped_column(Numeric(14, 6))
+    degradation_reason: Mapped[str] = mapped_column(String(64), nullable=False)
+    degradation_message: Mapped[str] = mapped_column(Text, nullable=False)
+    consecutive_degradation_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    evidence_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    model_artifact: Mapped[ModelArtifact | None] = relationship(back_populates="monitoring_snapshots")
+    retraining_runs: Mapped[list["RetrainingRun"]] = relationship(back_populates="source_monitoring_snapshot")
+
+
+class RetrainingRun(Base):
+    __tablename__ = "retraining_runs"
+    __table_args__ = (
+        CheckConstraint(
+            "status in ('recommended', 'pending', 'running', 'completed', 'failed', 'rejected')",
+            name="ck_retraining_runs_status",
+        ),
+        CheckConstraint("new_evaluated_forecast_days >= 0", name="ck_retraining_runs_evidence_days_non_negative"),
+        UniqueConstraint("evidence_key", name="uq_retraining_runs_evidence_key"),
+        Index("ix_retraining_runs_status_triggered", "status", "triggered_at"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    triggered_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
+    trigger_reason: Mapped[str] = mapped_column(String(64), nullable=False)
+    status: Mapped[str] = mapped_column(String(32), nullable=False, index=True)
+    baseline_model_artifact_id: Mapped[int] = mapped_column(ForeignKey("model_artifacts.id"), nullable=False, index=True)
+    source_monitoring_snapshot_id: Mapped[int] = mapped_column(
+        ForeignKey("model_monitoring_snapshots.id"),
+        nullable=False,
+        index=True,
+    )
+    new_evaluated_forecast_days: Mapped[int] = mapped_column(Integer, nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    candidate_model_artifact_id: Mapped[int | None] = mapped_column(ForeignKey("model_artifacts.id"), index=True)
+    promotion_recommended: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    failure_reason: Mapped[str | None] = mapped_column(Text)
+    evidence_key: Mapped[str] = mapped_column(String(128), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
+
+    baseline_model_artifact: Mapped[ModelArtifact] = relationship(
+        back_populates="retraining_runs_as_baseline",
+        foreign_keys=[baseline_model_artifact_id],
+    )
+    candidate_model_artifact: Mapped[ModelArtifact | None] = relationship(
+        back_populates="retraining_runs_as_candidate",
+        foreign_keys=[candidate_model_artifact_id],
+    )
+    source_monitoring_snapshot: Mapped[ModelMonitoringSnapshot] = relationship(back_populates="retraining_runs")

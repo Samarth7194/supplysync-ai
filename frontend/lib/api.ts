@@ -1,4 +1,5 @@
 import { env } from "./env";
+import { MODEL_MONITORING_ENDPOINT } from "./modelMonitoring";
 
 const API = env.apiUrl;
 
@@ -188,6 +189,47 @@ export interface HealthStatus {
   model_loaded: boolean;
 }
 
+export type ModelMonitoringStatus =
+  | "unavailable"
+  | "insufficient_evidence"
+  | "stable"
+  | "warning"
+  | "degraded";
+
+export type ModelMonitoringBaselineProvenance =
+  | "promotion_evidence"
+  | "artifact_metadata"
+  | "offline_backtest"
+  | "unavailable"
+  | string;
+
+export interface ModelMonitoringSnapshot {
+  model_artifact_id?: number | null;
+  model_name: string;
+  model_version?: string | null;
+  lifecycle_status?: string | null;
+  generated_at?: string | null;
+  status: ModelMonitoringStatus;
+  degradation_reason?: string | null;
+  degradation_message?: string | null;
+  evaluation_count: number;
+  window_type?: string | null;
+  window_size?: number | null;
+  metric_wape?: number | null;
+  metric_mae?: number | null;
+  metric_rmse?: number | null;
+  metric_bias?: number | null;
+  metric_mase?: number | null;
+  residual_mean?: number | null;
+  residual_std?: number | null;
+  baseline_wape?: number | null;
+  baseline_provenance?: ModelMonitoringBaselineProvenance | null;
+  wape_relative_change?: number | null;
+  bias_ratio?: number | null;
+  consecutive_degradation_count: number;
+  created?: boolean | null;
+}
+
 export type AuthMode = "off" | "demo";
 
 export interface AuthStatus {
@@ -232,7 +274,7 @@ export interface SkuHistory {
   window_days_requested?: number;
 }
 
-class ApiClient {
+export class ApiClient {
   private baseUrl: string;
 
   constructor(baseUrl: string = API) {
@@ -288,6 +330,10 @@ class ApiClient {
 
   async getModelInfo(): Promise<ModelInfoResponse> {
     return this.request("/api/model-info");
+  }
+
+  async getModelMonitoring(): Promise<ModelMonitoringSnapshot> {
+    return this.request(MODEL_MONITORING_ENDPOINT);
   }
 
   async getRecentAnalyses(limit: number = 10): Promise<RecentAnalysesResponse> {

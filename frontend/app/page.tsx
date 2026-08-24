@@ -24,12 +24,14 @@ import {
   type HealthStatus,
   type RecentAnalysis,
   type StockLevel,
+  type ModelMonitoringSnapshot,
 } from "@/lib/api";
 import {
   DataSourceBadge,
   forecastSourceKind,
 } from "@/components/DataSourceBadge";
 import { EmptyState } from "@/components/EmptyState";
+import { ModelHealthCard } from "@/components/ModelHealthCard";
 import { SectionHeader } from "@/components/SectionHeader";
 import { env } from "@/lib/env";
 import {
@@ -164,6 +166,9 @@ export default function Dashboard() {
   const [skusUnavailable, setSkusUnavailable] = useState(false);
   const [recentAnalyses, setRecentAnalyses] = useState<RecentAnalysis[]>([]);
   const [serverStock, setServerStock] = useState<Record<string, StockLevel>>({});
+  const [modelMonitoring, setModelMonitoring] = useState<ModelMonitoringSnapshot | null>(null);
+  const [modelMonitoringLoading, setModelMonitoringLoading] = useState(true);
+  const [modelMonitoringError, setModelMonitoringError] = useState(false);
   const [activeFilter, setActiveFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -178,6 +183,24 @@ export default function Dashboard() {
 
     async function fetchData() {
       try {
+        api
+          .getModelMonitoring()
+          .then((snapshot) => {
+            if (!cancelled) {
+              setModelMonitoring(snapshot);
+              setModelMonitoringError(false);
+            }
+          })
+          .catch(() => {
+            if (!cancelled) {
+              setModelMonitoring(null);
+              setModelMonitoringError(true);
+            }
+          })
+          .finally(() => {
+            if (!cancelled) setModelMonitoringLoading(false);
+          });
+
         const [healthRes, kpiRes, skuRes, stockRes] = await Promise.all([
           api.getHealth().catch(() => null),
           api.getKpis().catch(() => null),
@@ -239,6 +262,8 @@ export default function Dashboard() {
         if (cancelled) return;
         console.error("Failed to fetch data:", e);
         setError("Could not connect to the backend. Make sure the API server is running on " + API_URL);
+        setModelMonitoringLoading(false);
+        setModelMonitoringError(true);
         setLoading(false);
       }
     }
@@ -453,6 +478,12 @@ export default function Dashboard() {
             tooltip="LightGBM with lag and calendar features. See README 'Forecast Evaluation' for per-class metrics against naive, seasonal-naive, moving-avg-7, and Croston baselines."
           />
         </section>
+
+        <ModelHealthCard
+          snapshot={modelMonitoring}
+          loading={modelMonitoringLoading}
+          error={modelMonitoringError}
+        />
 
         {/* SKU Portfolio */}
         <section className="space-y-4">
