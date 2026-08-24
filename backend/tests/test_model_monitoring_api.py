@@ -233,10 +233,16 @@ def test_post_evaluate_creates_and_reuses_snapshot_without_lifecycle_change():
     _clean()
     artifact_id = _artifact(training_metrics={"wape": 1.0})
     _logged_evaluation(artifact_id=artifact_id)
+    original_data_service = backend_main._data_service
+    series = pd.Series([10.0, 10.0, 10.0], index=pd.date_range("2024-01-01", periods=3))
 
-    with TestClient(backend_main.app) as client:
-        first = client.post("/api/model-monitoring/evaluate").json()
-        second = client.post("/api/model-monitoring/evaluate").json()
+    try:
+        with TestClient(backend_main.app) as client:
+            backend_main._data_service = _StubDataService({"SKU-API": series})
+            first = client.post("/api/model-monitoring/evaluate").json()
+            second = client.post("/api/model-monitoring/evaluate").json()
+    finally:
+        backend_main._data_service = original_data_service
 
     assert first["created"] is True
     assert second["created"] is False

@@ -126,7 +126,14 @@ def test_retraining_status_api_does_not_affect_analyze():
 
     with TestClient(backend_main.app) as client:
         assert client.get("/api/model-retraining/status").status_code == 200
-        response = client.post("/api/analyze", json={"sku": "SKU-0", "current_stock": 10})
+        response = client.post(
+            "/api/analyze",
+            json={
+                "sku": "SKU-0",
+                "current_stock": 10,
+                "demand_history": [10, 11, 9, 12, 10, 8, 11, 10, 9, 12, 10, 11, 9, 10],
+            },
+        )
 
     assert response.status_code in {200, 503}
     if response.status_code == 200:
