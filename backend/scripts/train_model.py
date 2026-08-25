@@ -12,11 +12,15 @@ Usage:
     python scripts/train_model.py --csv my.csv --column-mapping cols.json
 """
 
+from __future__ import annotations
+
 import argparse
 import json
 import sys
 import os
+from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 
 # Add src to path for imports
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
@@ -35,7 +39,18 @@ from ingestion.load_retail_data import (
 from features.lag_features import create_lag_features
 from features.time_features import create_time_features
 from features.schema import FEATURE_COLUMNS, FEATURE_SCHEMA_VERSION, feature_schema_checksum
-from services.model_service import get_model_service, ModelService
+from services.model_service import ModelService
+
+
+@dataclass(frozen=True)
+class TrainingPipelineResult:
+    model_path: Path
+    metadata_path: Path
+    metadata: dict[str, Any]
+    train_rows: int
+    test_rows: int
+    daily_rows: int
+    sku_count: int
 
 
 def prepare_sku_features(sku_df: pd.DataFrame) -> pd.DataFrame:
@@ -46,63 +61,79 @@ def prepare_sku_features(sku_df: pd.DataFrame) -> pd.DataFrame:
     return df
 
 
-def train(csv_path=None, column_mapping=None, parquet_path=None, register_candidate=False):
-    print("=" * 60)
-    print("SupplySync AI - Model Training Pipeline")
-    print("=" * 60)
+def train_lightgbm_demand_model(
+    *,
+    csv_path=None,
+    column_mapping=None,
+    parquet_path=None,
+    model_dir: str | Path | None = None,
+    artifact_file: str | None = None,
+    metadata_file: str | None = None,
+    verbose: bool = True,
+) -> TrainingPipelineResult:
+    """Run the existing temporal LightGBM training pipeline and save an artifact.
+
+    This is the callable form used by controlled candidate training. It reuses
+    the same feature engineering, temporal holdout, LightGBM config, metadata,
+    checksum, and feature-schema behavior as the historical CLI.
+    """
+
+    def log(message: str = "") -> None:
+        if verbose:
+            print(message)
+
+    log("=" * 60)
+    log("SupplySync AI - Model Training Pipeline")
+    log("=" * 60)
 
     if csv_path:
-        print(f"Data source override: {csv_path}")
+        log(f"Data source override: {csv_path}")
     elif os.environ.get("DATA_CSV_PATH"):
-        print(f"Data source from env: {os.environ['DATA_CSV_PATH']}")
+        log(f"Data source from env: {os.environ['DATA_CSV_PATH']}")
 
-    # Step 1: Load and clean data
-    print("\n[1/6] Loading and cleaning raw data...")
+    log("\n[1/6] Loading and cleaning raw data...")
     raw_df = load_and_clean_retail_data(csv_path=csv_path, column_mapping=column_mapping)
-    print(f"  Cleaned data: {len(raw_df):,} rows")
+    log(f"  Cleaned data: {len(raw_df):,} rows")
 
-    # Step 2: Aggregate to daily demand
-    print("[2/6] Aggregating to daily demand...")
+    log("[2/6] Aggregating to daily demand...")
     resolved_parquet = parquet_path or os.environ.get("DATA_PARQUET_PATH")
     daily_df = aggregate_daily_demand(raw_df, output_path=resolved_parquet)
-    print(f"  Daily demand records: {len(daily_df):,}")
-    print(f"  Unique SKUs: {daily_df['StockCode'].nunique():,}")
+    log(f"  Daily demand records: {len(daily_df):,}")
+    log(f"  Unique SKUs: {daily_df['StockCode'].nunique():,}")
 
-    # Step 3: Select top SKUs
-    print("[3/6] Selecting top SKUs...")
+    log("[3/6] Selecting top SKUs...")
     top_skus = get_top_skus(daily_df, min_days=60, top_n=20)
-    print(f"  Training on {len(top_skus)} SKUs: {top_skus[:5]}...")
+    log(f"  Training on {len(top_skus)} SKUs: {top_skus[:5]}...")
 
-    # Step 4: Build feature matrix
-    print("[4/6] Engineering features...")
+    log("[4/6] Engineering features...")
     train_frames = []
     test_frames = []
     sku_last_features = {}
 
     for sku in top_skus:
-        sku_df = load_sku_demand(sku)
-        if len(sku_df) < 45:  # Need enough data for features + split
+        sku_df = load_sku_demand(sku, parquet_path=resolved_parquet)
+        if len(sku_df) < 45:
             continue
 
         featured = prepare_sku_features(sku_df)
         if len(featured) < 30:
             continue
 
-        # Temporal split: last 30 days = test
         split_idx = len(featured) - 30
         train_frames.append(featured.iloc[:split_idx])
         test_frames.append(featured.iloc[split_idx:])
 
-        # Cache last row of features for this SKU (for inference)
         last_row = featured[FEATURE_COLUMNS].iloc[[-1]]
         sku_last_features[sku] = last_row
 
+    if not train_frames or not test_frames:
+        raise ValueError("Insufficient training data after feature engineering; need SKUs with usable temporal holdout windows.")
+
     train_df = pd.concat(train_frames, ignore_index=True)
     test_df = pd.concat(test_frames, ignore_index=True)
-    print(f"  Train: {len(train_df):,} rows, Test: {len(test_df):,} rows")
+    log(f"  Train: {len(train_df):,} rows, Test: {len(test_df):,} rows")
 
-    # Step 5: Train LightGBM
-    print("[5/6] Training LightGBM model...")
+    log("[5/6] Training LightGBM model...")
     X_train = train_df[FEATURE_COLUMNS]
     y_train = train_df["demand"]
     X_test = test_df[FEATURE_COLUMNS]
@@ -121,25 +152,20 @@ def train(csv_path=None, column_mapping=None, parquet_path=None, register_candid
     )
     model.fit(X_train, y_train)
 
-    # Evaluate
-    preds = model.predict(X_test)
-    preds = np.maximum(preds, 0)  # Clamp to non-negative
+    preds = np.maximum(model.predict(X_test), 0)
 
     mae = mean_absolute_error(y_test, preds)
     rmse = np.sqrt(mean_squared_error(y_test, preds))
-    # MAPE only on non-zero actuals
     non_zero = y_test > 0
     mape = np.mean(np.abs((y_test[non_zero] - preds[non_zero]) / y_test[non_zero])) * 100 if non_zero.any() else 0
 
-    print(f"  MAE:  {mae:.2f}")
-    print(f"  RMSE: {rmse:.2f}")
-    print(f"  MAPE: {mape:.1f}%")
+    log(f"  MAE:  {mae:.2f}")
+    log(f"  RMSE: {rmse:.2f}")
+    log(f"  MAPE: {mape:.1f}%")
 
-    # Step 6: Save model
-    print("[6/6] Saving model and caching features...")
-    # Resolve saved_models dir relative to backend/
-    saved_models_dir = os.path.join(os.path.dirname(__file__), "..", "saved_models")
-    model_service = get_model_service(model_dir=saved_models_dir)
+    log("[6/6] Saving model and caching features...")
+    saved_models_dir = Path(model_dir) if model_dir else Path(__file__).resolve().parent.parent / "saved_models"
+    model_service = ModelService(model_dir=str(saved_models_dir))
 
     dataset_label = "online_retail_II.csv"
     if csv_path:
@@ -158,6 +184,8 @@ def train(csv_path=None, column_mapping=None, parquet_path=None, register_candid
         "rmse": round(rmse, 2),
         "mape": round(mape, 1),
         "dataset": dataset_label,
+        "artifact_file": artifact_file or "lightgbm_demand_forecast.pkl",
+        "metadata_file": metadata_file or "lightgbm_demand_forecast_metadata.json",
         "training_data": {
             "row_count": int(len(daily_df)),
             "sku_count": int(daily_df["StockCode"].nunique()),
@@ -176,6 +204,36 @@ def train(csv_path=None, column_mapping=None, parquet_path=None, register_candid
         },
     }
     model_service.save_model(model, "lightgbm_demand_forecast", metadata=metadata)
+    metadata = model_service.get_model_metadata("lightgbm_demand_forecast")
+
+    for sku, features in sku_last_features.items():
+        model_service.cache_features(sku, features)
+
+    model_path = model_service.artifact_path("lightgbm_demand_forecast", metadata)
+    metadata_path = model_service.model_dir / str(metadata.get("metadata_file", "lightgbm_demand_forecast_metadata.json"))
+    log(f"\n  Model saved to: {model_path}")
+    log("=" * 60)
+    log("Training complete!")
+    log("=" * 60)
+
+    return TrainingPipelineResult(
+        model_path=model_path,
+        metadata_path=metadata_path,
+        metadata=metadata,
+        train_rows=int(len(train_df)),
+        test_rows=int(len(test_df)),
+        daily_rows=int(len(daily_df)),
+        sku_count=int(daily_df["StockCode"].nunique()),
+    )
+
+
+def train(csv_path=None, column_mapping=None, parquet_path=None, register_candidate=False):
+    result = train_lightgbm_demand_model(
+        csv_path=csv_path,
+        column_mapping=column_mapping,
+        parquet_path=parquet_path,
+        verbose=True,
+    )
 
     if register_candidate:
         from db.session import SessionLocal
@@ -183,20 +241,13 @@ def train(csv_path=None, column_mapping=None, parquet_path=None, register_candid
 
         with SessionLocal() as session:
             artifact = ModelArtifactRepository(session).register_metadata(
-                model_service.get_model_metadata("lightgbm_demand_forecast"),
+                result.metadata,
                 status="candidate",
             )
             session.commit()
         print(f"  Registered candidate model artifact id={artifact.id} version={artifact.version}")
 
-    # Cache last features for each SKU
-    for sku, features in sku_last_features.items():
-        model_service.cache_features(sku, features)
-
-    print(f"\n  Model saved to: {model_service.model_dir / 'lightgbm_demand_forecast.pkl'}")
-    print("=" * 60)
-    print("Training complete!")
-    print("=" * 60)
+    return result
 
 
 def _parse_args():
@@ -211,7 +262,7 @@ def _parse_args():
         "--column-mapping",
         type=str,
         default=None,
-        help="Path to a JSON file mapping {source_col: canonical_col} — required if your CSV doesn't use UCI column names.",
+        help="Path to a JSON file mapping {source_col: canonical_col} - required if your CSV doesn't use UCI column names.",
     )
     parser.add_argument(
         "--parquet",

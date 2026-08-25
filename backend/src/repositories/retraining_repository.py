@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Any
 
 from sqlalchemy import select
@@ -76,6 +76,64 @@ class RetrainingRepository:
             .where(RetrainingRun.evidence_key == evidence_key)
         )
         return self.session.scalar(stmt)
+
+    def get_retraining_run(self, retraining_run_id: int) -> RetrainingRun | None:
+        stmt = (
+            select(RetrainingRun)
+            .options(
+                selectinload(RetrainingRun.baseline_model_artifact),
+                selectinload(RetrainingRun.candidate_model_artifact),
+                selectinload(RetrainingRun.source_monitoring_snapshot),
+            )
+            .where(RetrainingRun.id == retraining_run_id)
+        )
+        return self.session.scalar(stmt)
+
+    def candidate_run_for_evidence(self, evidence_key: str) -> RetrainingRun | None:
+        stmt = (
+            select(RetrainingRun)
+            .options(selectinload(RetrainingRun.candidate_model_artifact))
+            .where(RetrainingRun.evidence_key == evidence_key)
+            .where(RetrainingRun.candidate_model_artifact_id.is_not(None))
+            .order_by(RetrainingRun.id.asc())
+            .limit(1)
+        )
+        return self.session.scalar(stmt)
+
+    def mark_running(self, run: RetrainingRun, *, now: datetime | None = None) -> RetrainingRun:
+        run.status = "running"
+        run.started_at = now or datetime.now(timezone.utc)
+        run.failure_reason = None
+        run.updated_at = now or datetime.now(timezone.utc)
+        self.session.flush()
+        return run
+
+    def mark_completed(
+        self,
+        run: RetrainingRun,
+        *,
+        candidate_model_artifact_id: int,
+        promotion_recommended: bool,
+        now: datetime | None = None,
+    ) -> RetrainingRun:
+        timestamp = now or datetime.now(timezone.utc)
+        run.status = "completed"
+        run.finished_at = timestamp
+        run.updated_at = timestamp
+        run.candidate_model_artifact_id = candidate_model_artifact_id
+        run.promotion_recommended = promotion_recommended
+        run.failure_reason = None
+        self.session.flush()
+        return run
+
+    def mark_failed(self, run: RetrainingRun, *, reason: str, now: datetime | None = None) -> RetrainingRun:
+        timestamp = now or datetime.now(timezone.utc)
+        run.status = "failed"
+        run.finished_at = timestamp
+        run.updated_at = timestamp
+        run.failure_reason = reason[:1000]
+        self.session.flush()
+        return run
 
     def completed_evaluated_forecast_days(
         self,
