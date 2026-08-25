@@ -86,7 +86,7 @@ class ModelService:
         - Path to saved model
         """
         
-        model_path = self.artifact_path(model_name)
+        model_path = self.artifact_path(model_name, metadata)
 
         # Save model
         with open(model_path, 'wb') as f:
@@ -119,7 +119,9 @@ class ModelService:
             }
         )
         
-        metadata_path = self.metadata_path(model_name)
+        metadata_file = metadata.get("metadata_file") or f"{model_name}_metadata.json"
+        metadata["metadata_file"] = str(metadata_file)
+        metadata_path = self.model_dir / str(metadata_file)
         with open(metadata_path, 'w') as f:
             json.dump(metadata, f, indent=2)
         

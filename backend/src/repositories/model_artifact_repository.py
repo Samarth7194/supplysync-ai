@@ -123,7 +123,8 @@ class ModelArtifactRepository:
         artifact_path = Path(str(artifact_file))
         if not artifact_path.is_absolute():
             artifact_path = model_dir / artifact_path
-        metadata_path = model_dir / f"{model_name}_metadata.json"
+        metadata_file = metadata.get("metadata_file") or f"{model_name}_metadata.json"
+        metadata_path = model_dir / str(metadata_file)
 
         return {
             "model_name": model_name,
@@ -150,6 +151,8 @@ class ModelArtifactRepository:
                 "n_test_rows": metadata.get("n_test_rows"),
                 "training_data": metadata.get("training_data"),
                 "training_config": metadata.get("training_config"),
+                "candidate_training": metadata.get("candidate_training"),
+                "candidate_evaluation": metadata.get("candidate_evaluation"),
             },
             "lifecycle_status": status,
             "is_active": status == "active",
