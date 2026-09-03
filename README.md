@@ -69,7 +69,7 @@ Measured via `scripts/compute_kpis.py` on the top-10 SKUs by total demand, simul
 
 - **37.8% cost reduction** vs. a naive fixed-threshold reorder policy
 - **95.7% fill rate** across the simulated SKUs
-- **169 passing backend tests** with 6 intentional skips, covering forecasting routing, inventory math, evaluation, simulation, API contracts, provenance, auth, persistence, and cross-SKU generalization.
+- **257 passing backend tests** with 8 intentional skips, covering forecasting routing, inventory math, evaluation, simulation, API contracts, provenance, auth, persistence, and cross-SKU generalization.
 
 > These numbers are specific to UCI Online Retail II's top-10 SKUs. For a fair read on whether this approach fits **your** data, see [`docs/bring-your-own-data.md`](docs/bring-your-own-data.md) and run `python backend/scripts/evaluate_cross_sku.py`.
 
@@ -103,7 +103,7 @@ The project is deliberately scoped as a **portfolio-grade demo**: it runs on a s
 - **Real historical chart** — the SKU detail page fetches actual recorded daily demand from `/api/skus/{sku}/history`. When history isn't available, the chart is replaced by an honest "data unavailable" panel instead of fabricated bars.
 - **Business constraints** — MOQ, order multiples, max order cap, and a greedy budget optimizer across SKUs.
 - **Simulation-validated KPIs** — a day-by-day simulator compares naive vs. intelligent policies on real data to produce the savings/fill-rate numbers in the cached KPI JSON.
-- **100+ backend tests** — reorder logic, business constraints, forecasting paths, simulation, history endpoint, provenance classification, model-info contract, decision block, evaluation primitives, cross-SKU generalization, and column-mapping round-trips.
+- **250+ backend tests** — reorder logic, business constraints, forecasting paths, simulation, history endpoint, provenance classification, model-info contract, decision block, evaluation primitives, cross-SKU generalization, and column-mapping round-trips.
 
 ---
 
@@ -618,7 +618,7 @@ A recruiter or engineer can read the code and verify that:
 - **Data provenance is taken seriously** — real vs. model vs. statistical vs. rule-based vs. demo is distinguishable in every response and visible on every surface.
 - **The numbers are reproducible** — `scripts/compute_kpis.py` regenerates the cached KPIs from the same simulator the tests exercise.
 - **Generalization is inspected honestly** — `scripts/evaluate_cross_sku.py` holds out SKUs the model never saw and reports the result, even when baselines win.
-- **Tests hold the contract** — 100+ pytest cases cover routing between ML/statistical/fallback paths, provenance labels, history endpoint shape, simulation invariants, reorder/constraint logic, auth, cross-SKU generalization, and column-mapping round-trips.
+- **Tests hold the contract** — 250+ pytest cases cover routing between ML/statistical/fallback paths, provenance labels, history endpoint shape, simulation invariants, reorder/constraint logic, auth, cross-SKU generalization, and column-mapping round-trips.
 
 It's meant to be honest about what it is — a small, well-scoped, well-labeled inventory decision-support demo — and straightforward to extend toward something more production-grade.
 
@@ -713,5 +713,3 @@ The database table `model_artifacts` is the lifecycle source of truth after an
 artifact is registered. Historical `prediction_logs` keep their original
 `model_artifact_id`, `model_version`, and `feature_schema_version`, even if a
 new artifact is promoted later.
-
-

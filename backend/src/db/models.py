@@ -25,6 +25,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     func,
+    text,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlalchemy.types import Uuid
@@ -221,6 +222,13 @@ class ModelArtifact(Base):
             "lifecycle_status in ('candidate', 'active', 'retired', 'failed')",
             name="ck_model_artifacts_lifecycle_status",
         ),
+        Index(
+            "uq_model_artifacts_one_active_per_model",
+            "model_name",
+            unique=True,
+            postgresql_where=text("is_active = true"),
+            sqlite_where=text("is_active = 1"),
+        ),
     )
 
     id: Mapped[int] = mapped_column(primary_key=True)
@@ -258,6 +266,31 @@ class ModelArtifact(Base):
         foreign_keys="RetrainingRun.candidate_model_artifact_id",
     )
 
+
+class ModelPromotionEvent(Base):
+    __tablename__ = "model_promotion_events"
+    __table_args__ = (
+        CheckConstraint("event_type in ('promotion', 'rollback')", name="ck_model_promotion_events_type"),
+        CheckConstraint(
+            "outcome in ('pending', 'succeeded', 'handoff_failed_restored')",
+            name="ck_model_promotion_events_outcome",
+        ),
+        Index("ix_model_promotion_events_model_created", "model_name", "created_at"),
+        Index("ix_model_promotion_events_promoted", "promoted_model_artifact_id"),
+        Index("ix_model_promotion_events_previous", "previous_model_artifact_id"),
+        Index("ix_model_promotion_events_retraining", "retraining_run_id"),
+    )
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    event_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    model_name: Mapped[str] = mapped_column(String(128), nullable=False)
+    promoted_model_artifact_id: Mapped[int] = mapped_column(ForeignKey("model_artifacts.id"), nullable=False)
+    previous_model_artifact_id: Mapped[int | None] = mapped_column(ForeignKey("model_artifacts.id"))
+    retraining_run_id: Mapped[int | None] = mapped_column(ForeignKey("retraining_runs.id"))
+    outcome: Mapped[str] = mapped_column(String(32), nullable=False, default="succeeded", server_default="succeeded")
+    initiated_by: Mapped[str] = mapped_column(String(128), nullable=False, default="manual_cli", server_default="manual_cli")
+    reason: Mapped[str | None] = mapped_column(Text)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now())
 
 class ModelMonitoringSnapshot(Base):
     __tablename__ = "model_monitoring_snapshots"

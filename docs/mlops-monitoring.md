@@ -426,12 +426,16 @@ Retraining recommendation: implemented.
 
 Retraining decision tracking: implemented.
 
+Candidate training and evaluation: implemented as explicit operator-controlled Phase F commands.
+
+Controlled model promotion and rollback: implemented as explicit operator-controlled Phase G commands.
+
+MLOps operational cycle: implemented as a scheduler-ready Phase H command.
+
+Scheduled production job: not configured in repository; create it externally, for example with Render Cron.
+
 Statistical input/data drift: not yet implemented.
 
-Automatic retraining: not yet implemented.
-
-Candidate evaluation: not yet implemented.
+Automatic retraining execution: not implemented.
 
 Automatic promotion: not implemented.
-
-Scheduled execution: not yet implemented.
