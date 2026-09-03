@@ -66,6 +66,9 @@ class ModelInfoData:
     dataset: str | None = None
     evaluation_available: bool = False
     evaluation_generated_at: str | None = None
+    artifact_id: int | None = None
+    runtime_source: str | None = None
+    lifecycle_status: str | None = None
 
 
 @dataclass(frozen=True)
@@ -149,6 +152,7 @@ class AnalysisService:
         analysis_repository: AnalysisRepository | None = None,
         model_loaded: bool = False,
         model_dir: str | Path | None = None,
+        runtime_model_status: dict[str, Any] | None = None,
     ):
         self.inventory_service = inventory_service
         self.settings = settings
@@ -157,6 +161,7 @@ class AnalysisService:
         self.model_loaded = model_loaded
         self.model_dir = Path(model_dir) if model_dir else Path(__file__).resolve().parents[2] / "saved_models"
         self.backend_dir = self.model_dir.parent
+        self.runtime_model_status = runtime_model_status or {}
 
     def analyze(self, request: Any) -> dict[str, Any]:
         if self.inventory_service is None:
@@ -407,19 +412,23 @@ class AnalysisService:
             meta = model_service.get_model_metadata("lightgbm_demand_forecast") or {}
             artifact_status = model_service.artifact_status("lightgbm_demand_forecast")
             features = meta.get("features") or []
+            status = self.runtime_model_status or {}
             return ModelInfoData(
                 model_name="lightgbm_demand_forecast",
                 model_type="ml",
                 artifact_available=self.model_loaded,
-                model_version=meta.get("version") or self._checksum_version(),
-                feature_schema_version=meta.get("feature_schema_version"),
+                model_version=status.get("version") or meta.get("version") or self._checksum_version(),
+                feature_schema_version=status.get("feature_schema_version") or meta.get("feature_schema_version"),
                 artifact_checksum=meta.get("artifact_checksum"),
-                artifact_valid=bool(artifact_status.get("valid")),
+                artifact_valid=bool(status.get("valid", artifact_status.get("valid"))),
                 trained_at=meta.get("saved_at"),
                 feature_count=len(features) if features else None,
                 dataset=meta.get("dataset"),
                 evaluation_available=eval_available,
                 evaluation_generated_at=eval_generated_at,
+                artifact_id=status.get("artifact_id"),
+                runtime_source=status.get("source"),
+                lifecycle_status=status.get("lifecycle_status"),
             )
 
         if method in STATISTICAL_METHOD_NAMES:

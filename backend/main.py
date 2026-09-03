@@ -7,6 +7,7 @@ import os
 import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
+from threading import RLock
 from typing import Literal, List, Optional
 
 from fastapi import Cookie, Depends, FastAPI, HTTPException, Query, Response, Security
@@ -20,13 +21,13 @@ sys.path.append(os.path.join(os.path.dirname(__file__), "src"))
 from services.data_service import DataService
 from services.intelligent_inventory_service import IntelligentInventoryService
 from services.model_service import get_model_service
-from services.model_service import ModelArtifactValidationError
 from ingestion.load_retail_data import get_sku_descriptions
 from config.settings import load_settings
 from dependencies.analysis import get_analysis_repository
 from dependencies.stock import get_stock_service
 from db.session import database_health
 from db.session import get_session
+from db.session import SessionLocal
 from repositories.analysis_repository import AnalysisRepository
 from repositories.model_monitoring_repository import ModelMonitoringRepository
 from repositories.retraining_repository import RetrainingRepository
@@ -36,6 +37,7 @@ from services.analysis_service import (
     AnalysisServiceUnavailableError,
 )
 from services.model_monitoring_service import ModelMonitoringService
+from services.runtime_model_service import LoadedRuntimeModel, load_runtime_model
 from services.retraining_decision_service import RetrainingDecisionService
 from services.stock_service import (
     InvalidStockLevelError,
@@ -61,6 +63,8 @@ _data_service: Optional[DataService] = None
 _sku_descriptions: dict = {}
 _inventory_service: Optional[IntelligentInventoryService] = None
 _model_artifact_status: dict = {}
+_runtime_model_state: LoadedRuntimeModel | None = None
+_runtime_lock = RLock()
 
 # --- Runtime configuration --------------------------------------------------
 
@@ -115,29 +119,20 @@ verify_api_key = require_access
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global _loaded_model, _data_service, _sku_descriptions, _inventory_service, _model_artifact_status
+    global _loaded_model, _data_service, _sku_descriptions, _inventory_service, _model_artifact_status, _runtime_model_state
 
-    model_service = get_model_service(model_dir=SETTINGS.forecasting.model_path)
-    model_feature_columns: Optional[List[str]] = None
-    try:
-        _model_artifact_status = model_service.artifact_status("lightgbm_demand_forecast")
-        _loaded_model = model_service.load_model("lightgbm_demand_forecast")
-        metadata = model_service.get_model_metadata("lightgbm_demand_forecast")
-        model_feature_columns = metadata.get("features") if metadata else None
+    _runtime_model_state = load_runtime_model(settings=SETTINGS, session_factory=SessionLocal)
+    _loaded_model = _runtime_model_state.model
+    _model_artifact_status = dict(_runtime_model_state.status)
+    model_feature_columns: Optional[List[str]] = _runtime_model_state.feature_columns
+    if _loaded_model is not None:
         logger.info(
-            "Loaded forecasting model; feature schema has %d columns",
+            "Loaded forecasting model from %s; feature schema has %d columns",
+            _model_artifact_status.get("source"),
             len(model_feature_columns) if model_feature_columns else 0,
         )
-    except FileNotFoundError:
-        _loaded_model = None
-        logger.warning("Trained forecasting model not found; inference will fall back")
-    except ModelArtifactValidationError as exc:
-        _loaded_model = None
-        _model_artifact_status = model_service.artifact_status("lightgbm_demand_forecast")
-        logger.warning(
-            "Trained forecasting model failed validation; inference will fall back",
-            extra={"operation": "load_model", "model_name": "lightgbm_demand_forecast", "exception_type": type(exc).__name__},
-        )
+    else:
+        logger.warning("No trained forecasting model loaded; inference will fall back")
 
     try:
         _data_service = DataService.get_instance()
@@ -175,6 +170,11 @@ app.add_middleware(
 )
 
 
+def _runtime_snapshot() -> tuple[object | None, IntelligentInventoryService | None, dict]:
+    with _runtime_lock:
+        return _loaded_model, _inventory_service, dict(_model_artifact_status)
+
+
 def get_analysis_service(
     analysis_repository: AnalysisRepository = Depends(get_analysis_repository),
 ) -> AnalysisService:
@@ -184,13 +184,15 @@ def get_analysis_service(
     needs access to lifespan-initialized app state such as the loaded model,
     data service, and inventory service.
     """
+    loaded_model, inventory_service, artifact_status = _runtime_snapshot()
     return AnalysisService(
-        inventory_service=_inventory_service,
+        inventory_service=inventory_service,
         settings=SETTINGS,
         data_service=_data_service,
         analysis_repository=analysis_repository,
-        model_loaded=_loaded_model is not None,
+        model_loaded=loaded_model is not None,
         model_dir=SETTINGS.forecasting.model_path,
+        runtime_model_status=artifact_status,
     )
 
 
@@ -204,6 +206,29 @@ def get_model_monitoring_service(
         data_service=_data_service,
         offline_evaluation_path=Path(__file__).resolve().parent / "data" / "forecast_evaluation.json",
     )
+
+
+
+def handoff_runtime_model(loaded: LoadedRuntimeModel) -> None:
+    """Atomically swap the in-process forecasting runtime after validation.
+
+    The caller must pass a fully loaded artifact. No globals are changed until
+    this function receives that loaded state, so /api/analyze never sees a
+    half-loaded model.
+    """
+    global _loaded_model, _inventory_service, _model_artifact_status, _runtime_model_state
+
+    if loaded.model is None:
+        raise RuntimeError("Cannot hand off an unloaded runtime model.")
+    next_inventory_service = IntelligentInventoryService(
+        model=loaded.model,
+        model_feature_columns=loaded.feature_columns,
+    )
+    with _runtime_lock:
+        _loaded_model = loaded.model
+        _runtime_model_state = loaded
+        _model_artifact_status = dict(loaded.status)
+        _inventory_service = next_inventory_service
 
 
 def get_retraining_decision_service(
@@ -278,6 +303,9 @@ class ModelInfo(BaseModel):
     dataset: Optional[str] = None
     evaluation_available: bool = False
     evaluation_generated_at: Optional[str] = None
+    artifact_id: Optional[int] = None
+    runtime_source: Optional[str] = None
+    lifecycle_status: Optional[str] = None
 
 
 MonitoringStatus = Literal["unavailable", "insufficient_evidence", "stable", "warning", "degraded"]
@@ -483,20 +511,24 @@ async def health():
     """
     kpi_cache = Path(__file__).resolve().parent / "data" / "cached_kpis.json"
     database = database_health()
+    loaded_model, _, artifact_status = _runtime_snapshot()
     return {
         "status": "online",
-        "model_loaded": _loaded_model is not None,
+        "model_loaded": loaded_model is not None,
         "data_available": _data_service is not None,
         "kpis_available": kpi_cache.exists(),
         "database": database,
         "model_artifact": {
-            "valid": bool(_model_artifact_status.get("valid", _loaded_model is not None)),
-            "model_name": _model_artifact_status.get("model_name", "lightgbm_demand_forecast"),
-            "version": _model_artifact_status.get("version"),
-            "feature_schema_version": _model_artifact_status.get("feature_schema_version"),
-            "lifecycle_status": _model_artifact_status.get("lifecycle_status"),
+            "valid": bool(artifact_status.get("valid", loaded_model is not None)),
+            "model_name": artifact_status.get("model_name", "lightgbm_demand_forecast"),
+            "version": artifact_status.get("version"),
+            "feature_schema_version": artifact_status.get("feature_schema_version"),
+            "lifecycle_status": artifact_status.get("lifecycle_status"),
+            "artifact_id": artifact_status.get("artifact_id"),
+            "runtime_source": artifact_status.get("source"),
+            "loadable": artifact_status.get("loadable"),
         },
-        "hint": None if (_loaded_model and _data_service and kpi_cache.exists())
+        "hint": None if (loaded_model and _data_service and kpi_cache.exists())
                 else "Run `python scripts/bootstrap.py` to generate missing artifacts.",
     }
 
@@ -526,9 +558,10 @@ async def model_info():
     the UI.
     """
     backend_dir = Path(__file__).resolve().parent
-    model_service = get_model_service(model_dir=str(backend_dir / "saved_models"))
+    model_service = get_model_service(model_dir=SETTINGS.forecasting.model_path)
     meta = model_service.get_model_metadata("lightgbm_demand_forecast") or {}
-    artifact_status = model_service.artifact_status("lightgbm_demand_forecast")
+    loaded_model, _, runtime_artifact_status = _runtime_snapshot()
+    artifact_status = dict(runtime_artifact_status or model_service.artifact_status("lightgbm_demand_forecast"))
 
     eval_path = backend_dir / "data" / "forecast_evaluation.json"
     eval_available = eval_path.exists()
@@ -543,16 +576,19 @@ async def model_info():
         except Exception as exc:  # noqa: BLE001
             logger.warning("Evaluation artifact unreadable: %s", exc)
 
-    artifact_available = _loaded_model is not None
+    artifact_available = loaded_model is not None
     features = meta.get("features") or []
     return {
         "model_name": "lightgbm_demand_forecast",
         "model_type": "ml",
         "artifact_available": artifact_available,
-        "model_version": meta.get("version"),
-        "feature_schema_version": meta.get("feature_schema_version"),
+        "model_version": artifact_status.get("version") or meta.get("version"),
+        "feature_schema_version": artifact_status.get("feature_schema_version") or meta.get("feature_schema_version"),
         "artifact_valid": bool(artifact_status.get("valid")),
-        "lifecycle_status": meta.get("lifecycle_status"),
+        "lifecycle_status": artifact_status.get("lifecycle_status") or meta.get("lifecycle_status"),
+        "artifact_id": artifact_status.get("artifact_id"),
+        "runtime_source": artifact_status.get("source"),
+        "loadable": artifact_status.get("loadable"),
         "trained_at": meta.get("saved_at"),
         "dataset": meta.get("dataset"),
         "feature_count": len(features) if features else None,
