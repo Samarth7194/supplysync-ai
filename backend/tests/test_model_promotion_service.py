@@ -324,6 +324,82 @@ def test_artifact_uri_resolution_uses_portable_filename_fallback(tmp_path):
     assert ModelService.checksum_file(resolved) == checksum
 
 
+def test_rollback_activates_initial_baseline_when_no_active_artifact_exists(tmp_path):
+    """Covers the zero-active-artifact bootstrap edge case: a single valid
+    'candidate' artifact with no active row anywhere for the model. This is
+    the exact production scenario where a model was deployed by placing a
+    file on disk without ever going through DB registration/promotion."""
+    session = _session()
+    baseline = _artifact(session, tmp_path / "baseline.pkl", version="baseline-v1", status="candidate", value=1)
+    baseline_path = Path(baseline.artifact_uri)
+
+    assert _active_count(session) == 0
+
+    result = ModelPromotionService(
+        session=session,
+        settings=_settings(tmp_path),
+        runtime_handoff=lambda loaded: None,
+    ).rollback_to_artifact(baseline.id, initiated_by="test", reason="initial baseline activation")
+
+    assert result.changed is True
+    assert baseline.lifecycle_status == "active"
+    assert baseline.is_active is True
+    assert baseline.activated_at is not None
+    assert baseline.retired_at is None
+    assert baseline_path.exists()
+    assert _active_count(session) == 1
+
+    events = session.scalars(select(ModelPromotionEvent)).all()
+    assert len(events) == 1
+    event = events[0]
+    assert event.event_type == "rollback"
+    assert event.promoted_model_artifact_id == baseline.id
+    assert event.previous_model_artifact_id is None
+    assert event.outcome == "succeeded"
+
+    # Idempotency: re-running against the now-active same artifact must be a
+    # safe no-op — no duplicate event, no lifecycle churn.
+    second_result = ModelPromotionService(
+        session=session,
+        settings=_settings(tmp_path),
+        runtime_handoff=lambda loaded: None,
+    ).rollback_to_artifact(baseline.id, initiated_by="test", reason="re-run")
+
+    assert second_result.changed is False
+    assert second_result.event is None
+    assert baseline.is_active is True
+    assert baseline.lifecycle_status == "active"
+    assert _active_count(session) == 1
+    assert len(session.scalars(select(ModelPromotionEvent)).all()) == 1
+
+
+def test_rollback_bootstrap_still_enforces_preflight_when_checksum_invalid(tmp_path):
+    """The zero-active-artifact bootstrap path must not skip the normal
+    checksum/schema/deserialization preflight, and must not weaken the
+    separate Phase-F promotion evidence gate used by promote_candidate."""
+    session = _session()
+    tampered = _artifact(
+        session,
+        tmp_path / "tampered.pkl",
+        version="tampered-v1",
+        status="candidate",
+        checksum="0" * 64,
+    )
+
+    with pytest.raises(ModelPromotionServiceError):
+        ModelPromotionService(session=session, settings=_settings(tmp_path)).rollback_to_artifact(tampered.id)
+
+    assert tampered.is_active is False
+    assert tampered.lifecycle_status == "candidate"
+    assert _active_count(session) == 0
+
+    # promote_candidate's evidence gate is untouched by the bootstrap path:
+    # a bare candidate with no RetrainingRun/candidate_evaluation is still
+    # rejected by promotion, exactly as before.
+    with pytest.raises(ModelPromotionServiceError, match="eligible candidate-evaluation"):
+        ModelPromotionService(session=session, settings=_settings(tmp_path)).promote_candidate(tampered.id)
+
+
 
 
 
