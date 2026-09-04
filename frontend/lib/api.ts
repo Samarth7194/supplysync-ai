@@ -1,5 +1,5 @@
 import { env } from "./env";
-import { MODEL_MONITORING_ENDPOINT } from "./modelMonitoring";
+import { MODEL_MONITORING_ENDPOINT, MODEL_MONITORING_REPLAY_ENDPOINT } from "./modelMonitoring";
 
 const API = env.apiUrl;
 
@@ -230,6 +230,55 @@ export interface ModelMonitoringSnapshot {
   created?: boolean | null;
 }
 
+/**
+ * Historical monitoring replay evidence — a held-out historical-window
+ * backtest of the forecast -> evaluate -> monitor lifecycle, generated
+ * offline because the processed dataset is historical and there is no
+ * connected ERP/POS actual-demand stream. This is NEVER live production
+ * monitoring; see `live_monitoring` for whether real live evidence exists.
+ */
+export interface HistoricalReplayMetrics {
+  wape?: number | null;
+  mae?: number | null;
+  rmse?: number | null;
+  bias?: number | null;
+  mase?: number | null;
+}
+
+export interface HistoricalReplayPeriod {
+  start?: string | null;
+  end?: string | null;
+}
+
+export interface LiveMonitoringSummary {
+  available: boolean;
+  evaluation_count: number;
+}
+
+export interface HistoricalReplayResponse {
+  mode: "historical_replay";
+  available: boolean;
+  model_name?: string | null;
+  model_artifact_id?: number | null;
+  model_version?: string | null;
+  status?: ModelMonitoringStatus | null;
+  degradation_reason?: string | null;
+  degradation_message?: string | null;
+  metrics: HistoricalReplayMetrics;
+  baseline_wape?: number | null;
+  baseline_provenance?: ModelMonitoringBaselineProvenance | null;
+  evaluation_count: number;
+  forecast_days?: number | null;
+  horizon_days?: number | null;
+  sku_count?: number | null;
+  historical_period: HistoricalReplayPeriod;
+  generated_at?: string | null;
+  provenance: "historical_replay";
+  method_breakdown: Record<string, { sku_count: number; evaluation_count: number; wape: number | null }>;
+  live_monitoring: LiveMonitoringSummary;
+  message?: string | null;
+}
+
 export type AuthMode = "off" | "demo";
 
 export interface AuthStatus {
@@ -334,6 +383,11 @@ export class ApiClient {
 
   async getModelMonitoring(): Promise<ModelMonitoringSnapshot> {
     return this.request(MODEL_MONITORING_ENDPOINT);
+  }
+
+  /** Historical holdout replay evidence — never live production monitoring. */
+  async getModelMonitoringReplay(): Promise<HistoricalReplayResponse> {
+    return this.request(MODEL_MONITORING_REPLAY_ENDPOINT);
   }
 
   async getRecentAnalyses(limit: number = 10): Promise<RecentAnalysesResponse> {

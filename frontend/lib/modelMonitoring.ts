@@ -1,7 +1,8 @@
-import type { ModelMonitoringSnapshot, ModelMonitoringStatus } from "./api";
+import type { HistoricalReplayResponse, ModelMonitoringSnapshot, ModelMonitoringStatus } from "./api";
 
 export const MONITORING_DASH = "—";
 export const MODEL_MONITORING_ENDPOINT = "/api/model-monitoring";
+export const MODEL_MONITORING_REPLAY_ENDPOINT = "/api/model-monitoring/replay";
 
 export const MODEL_MONITORING_STATUS_LABELS: Record<ModelMonitoringStatus, string> = {
   unavailable: "Unavailable",
@@ -103,4 +104,61 @@ export function formatMonitoringTime(value: string | null | undefined): string {
     hour: "2-digit",
     minute: "2-digit",
   });
+}
+
+// -- Historical replay ------------------------------------------------------
+//
+// Historical replay is a held-out historical-window backtest of the same
+// forecast -> evaluate -> monitor lifecycle, generated offline because the
+// processed dataset is historical and there is no connected ERP/POS
+// actual-demand stream. It must never be confused with live monitoring —
+// see `selectModelHealthEvidence` for the display precedence rule.
+
+export type ModelHealthEvidence =
+  | { mode: "live"; snapshot: ModelMonitoringSnapshot }
+  | { mode: "historical_replay"; replay: HistoricalReplayResponse }
+  | { mode: "unavailable" };
+
+/**
+ * Decide what the Model Health card should display.
+ *
+ * Precedence (never combined):
+ *   1. LIVE monitoring, only when a real snapshot exists AND it has reached
+ *      a classified state (stable/warning/degraded) — insufficient_evidence
+ *      is honest but not "sufficient valid evidence", so it falls through.
+ *   2. HISTORICAL REPLAY, only when live evidence is not sufficient and a
+ *      replay result is available.
+ *   3. Unavailable.
+ */
+export function selectModelHealthEvidence(params: {
+  liveSnapshot: ModelMonitoringSnapshot | null | undefined;
+  liveError: boolean;
+  replay: HistoricalReplayResponse | null | undefined;
+}): ModelHealthEvidence {
+  const { liveSnapshot, liveError, replay } = params;
+  const liveHasSufficientEvidence =
+    !liveError &&
+    !!liveSnapshot &&
+    (["stable", "warning", "degraded"] as ModelMonitoringStatus[]).includes(liveSnapshot.status);
+
+  if (liveHasSufficientEvidence && liveSnapshot) {
+    return { mode: "live", snapshot: liveSnapshot };
+  }
+  if (replay?.available) {
+    return { mode: "historical_replay", replay };
+  }
+  return { mode: "unavailable" };
+}
+
+export function historicalReplayExplanation(replay: HistoricalReplayResponse | null | undefined): string {
+  if (!replay?.available) return "No historical replay has been generated yet.";
+  return (
+    replay.degradation_message ||
+    "Historical replay demonstrates model monitoring using held-out historical demand."
+  );
+}
+
+export function formatReplayPeriod(period: { start?: string | null; end?: string | null } | null | undefined): string {
+  if (!period?.start || !period?.end) return MONITORING_DASH;
+  return `${period.start} → ${period.end}`;
 }

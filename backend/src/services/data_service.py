@@ -51,6 +51,14 @@ class DataService:
     def get_available_skus(self) -> list:
         return self._demand_data["StockCode"].unique().tolist()
 
+    def get_dataset_date_range(self) -> tuple[pd.Timestamp, pd.Timestamp]:
+        """Return the (min, max) recorded date across the whole processed dataset.
+
+        Used by historical-replay tooling to pick anchor dates that stay
+        inside the dataset instead of running past its end.
+        """
+        return self._demand_data["date"].min(), self._demand_data["date"].max()
+
     def get_top_skus(self, n: int = 20) -> list:
         stats = self._demand_data.groupby("StockCode").agg(
             total=("demand", "sum"),

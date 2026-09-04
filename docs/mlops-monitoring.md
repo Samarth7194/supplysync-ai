@@ -7,6 +7,9 @@ This document describes the current SupplySync AI MLOps monitoring layer:
 - Phase C: read-only monitoring API
 - Phase D: frontend model-health visibility
 - Phase E: retraining recommendation and run tracking
+- Historical Monitoring Replay: offline demo evidence for the same lifecycle
+  (see the dedicated section below) — this is not a numbered phase and is
+  never live production evidence.
 
 ## What Phase A Does
 
@@ -416,6 +419,131 @@ recommendation record when the evidence qualifies. It never calls
 A retraining recommendation does not change the model serving production
 inference.
 
+## Historical Monitoring Replay (Demo Evidence — Not Live Monitoring)
+
+### Why this exists
+
+The processed dataset (`data/processed/daily_demand.parquet`) is a static
+historical retail extract, 2009-12-01 through 2011-12-09. There is no
+connected ERP/POS actual-demand stream. A prediction logged today targets a
+future window that will never arrive in this dataset, so it can never mature
+into a real `forecast_evaluations` row — live monitoring then honestly
+reports `insufficient_evidence` or `unavailable` indefinitely, through no
+fault of the monitoring logic itself.
+
+Historical replay demonstrates the exact same forecast → evaluate → monitor
+lifecycle honestly, by picking an anchor date inside the dataset and
+evaluating against demand that has already been recorded, instead of
+predictions that can never resolve.
+
+### There are three distinct evidence classes — do not confuse them
+
+```text
+1. Offline Backtest        (scripts/evaluate_forecast.py, forecast_evaluation.json)
+   One-step-ahead backtest with real actuals fed back each step. Powers the
+   dashboard's "Backtest Performance" KPIs and the routing/monitoring
+   baseline WAPE. Not a replay of the monitoring lifecycle itself.
+
+2. Historical Monitoring Replay   (this section)
+   A single multi-day forecast issued at a historical anchor date T using
+   only demand <= T (the same hybrid routing/forecasting code production
+   uses), evaluated against the already-recorded actual demand for T+1..T+H,
+   then classified stable/warning/degraded with the same monitoring math as
+   live snapshots. Demonstrates the operational lifecycle end-to-end.
+
+3. Live Production Monitoring   (Phases A-C above)
+   Real logged predictions evaluated against real future actuals as they
+   become available. Currently limited by the lack of a live actual-demand
+   feed, as described above.
+```
+
+### What replay does and does not do
+
+It reuses production code paths: `classify_sku_demand_pattern`,
+`adaptive_forecast` (the real regular/intermittent/highly-intermittent
+routing — Croston-SBA and the conservative method are exercised honestly,
+not hidden behind a LightGBM-only demo), and the same metric formulas
+(`evaluation/metrics.py`) and classification thresholds
+(`ModelMonitoringService`'s WAPE/bias rules) as live monitoring.
+
+It never writes to `prediction_logs`, `forecast_evaluations`,
+`model_monitoring_snapshots`, or `retraining_runs`. It never opens a database
+session. `RetrainingDecisionService` only ever reads the live tables, so
+replay evidence structurally cannot influence a live retraining
+recommendation — there is no configuration flag that could accidentally
+wire the two together because no shared table exists between them.
+
+The artifact-level status (`stable`/`warning`/`degraded`) is scoped to the
+`ml_lightgbm`-routed SKUs only, since Model Health specifically monitors the
+active LightGBM artifact. Croston/conservative results are still reported
+honestly in a separate `method_breakdown`, never folded into the
+LightGBM-scoped status.
+
+No model is trained. No model is promoted. No artifact lifecycle changes.
+
+### Generating a replay
+
+Run from `backend/`:
+
+```powershell
+python scripts/run_historical_monitoring_replay.py
+python scripts/run_historical_monitoring_replay.py --horizon 14 --sku-limit 40 --num-windows 3
+python scripts/run_historical_monitoring_replay.py --json
+python scripts/run_historical_monitoring_replay.py --dry-run
+```
+
+Anchors are deterministic — non-overlapping windows walking backward from the
+dataset's end date, oldest first, so results are reproducible run to run for
+the same arguments and the same dataset. There is no random SKU or window
+selection.
+
+The result is written to `backend/data/historical_monitoring_replay.json` and
+is read (never regenerated) by:
+
+### `GET /api/model-monitoring/replay`
+
+Read-only. Serves the pre-generated JSON file and always includes a
+`live_monitoring` block so a caller can implement the precedence rule below
+without a second request. It never triggers replay generation itself.
+
+```json
+{
+  "mode": "historical_replay",
+  "available": true,
+  "status": "warning",
+  "metrics": { "wape": 1.25, "mae": 92.2, "rmse": 228.5, "bias": 21.1, "mase": 1.23 },
+  "baseline_wape": 1.0655,
+  "baseline_provenance": "offline_backtest",
+  "evaluation_count": 39,
+  "sku_count": 59,
+  "horizon_days": 7,
+  "historical_period": { "start": "2011-11-19", "end": "2011-12-09" },
+  "provenance": "historical_replay",
+  "live_monitoring": { "available": false, "evaluation_count": 0 }
+}
+```
+
+### Display precedence (frontend)
+
+```text
+1. live monitoring has a classified state (stable/warning/degraded) -> show LIVE
+2. otherwise, if a historical replay is available                  -> show HISTORICAL REPLAY, clearly badged
+3. otherwise                                                        -> show Unavailable
+```
+
+Live and replay evidence counts are never summed or combined. The Model
+Health card renders a highly visible `HISTORICAL REPLAY` badge plus the
+sentence "Based on historical holdout replay. This is not live production
+monitoring." whenever replay is shown instead of live evidence.
+
+### Honest wording
+
+Use: historical replay, historical holdout monitoring, offline operational
+replay, demo monitoring evidence.
+
+Never describe replay as: live monitoring, production actuals, real-time
+drift, or live ERP evidence.
+
 ## Implementation Status
 
 Monitoring API: implemented.
@@ -431,6 +559,8 @@ Candidate training and evaluation: implemented as explicit operator-controlled P
 Controlled model promotion and rollback: implemented as explicit operator-controlled Phase G commands.
 
 MLOps operational cycle: implemented as a scheduler-ready Phase H command.
+
+Historical monitoring replay: implemented as an offline demo-evidence command and read-only API endpoint; never live production evidence and never wired into retraining.
 
 Scheduled production job: not configured in repository; create it externally, for example with Render Cron.
 
