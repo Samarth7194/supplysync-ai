@@ -8,12 +8,14 @@ import {
   MODEL_MONITORING_REPLAY_ENDPOINT,
   MODEL_MONITORING_STATUS_EXPLANATIONS,
   formatBaselineProvenance,
+  formatForecastMethodLabel,
   formatMonitoringMetric,
   formatMonitoringStatus,
   formatReplayPeriod,
   formatSignedPercent,
   historicalReplayExplanation,
   monitoringExplanation,
+  orderedMethodBreakdown,
   selectModelHealthEvidence,
   usesOfflineBacktestBaseline,
 } from "../lib/modelMonitoring.ts";
@@ -206,4 +208,70 @@ test("model health card visibly labels historical replay and never overclaims", 
   assert.match(source, /Live Production Evidence/);
   assert.match(source, /completed evaluations/);
   assert.doesNotMatch(source, /live ERP evidence|real-time drift/i);
+});
+
+// -- Forecasting method breakdown --------------------------------------------
+
+test("forecast method labels use customer-facing names, not internal keys", () => {
+  assert.equal(formatForecastMethodLabel("ml_lightgbm"), "LightGBM");
+  assert.equal(formatForecastMethodLabel("croston"), "Croston-SBA");
+  assert.equal(formatForecastMethodLabel("conservative"), "Conservative");
+});
+
+test("unknown forecast methods still get a readable label instead of crashing", () => {
+  assert.equal(formatForecastMethodLabel("simple_average"), "Simple Average");
+  assert.equal(formatForecastMethodLabel("some_future_method"), "Some Future Method");
+});
+
+test("method breakdown never invents a method absent from the payload", () => {
+  const entries = orderedMethodBreakdown({
+    ml_lightgbm: { sku_count: 47, evaluation_count: 133, wape: 1.137 },
+  });
+  assert.equal(entries.length, 1);
+  assert.equal(entries[0].method, "ml_lightgbm");
+  assert.equal(entries[0].label, "LightGBM");
+
+  assert.deepEqual(orderedMethodBreakdown({}), []);
+  assert.deepEqual(orderedMethodBreakdown(null), []);
+  assert.deepEqual(orderedMethodBreakdown(undefined), []);
+});
+
+test("method breakdown orders regular before intermittent before highly-intermittent", () => {
+  const entries = orderedMethodBreakdown({
+    conservative: { sku_count: 1, evaluation_count: 3, wape: 4.06 },
+    ml_lightgbm: { sku_count: 47, evaluation_count: 133, wape: 1.14 },
+    croston: { sku_count: 11, evaluation_count: 31, wape: 0.79 },
+  });
+  assert.deepEqual(
+    entries.map((e) => e.method),
+    ["ml_lightgbm", "croston", "conservative"],
+  );
+});
+
+test("method breakdown surfaces only sku count, evaluation count, and WAPE — no invented metrics", () => {
+  const entries = orderedMethodBreakdown({
+    croston: { sku_count: 11, evaluation_count: 31, wape: 0.79 },
+  });
+  assert.deepEqual(Object.keys(entries[0]).sort(), ["evaluationCount", "label", "method", "skuCount", "wape"]);
+});
+
+test("model health card renders the forecasting method performance section without hardcoding methods", () => {
+  const source = readFileSync(new URL("../components/ModelHealthCard.tsx", import.meta.url), "utf8");
+  assert.match(source, /Forecasting Method Performance/);
+  assert.match(source, /orderedMethodBreakdown/);
+  // Labels come from the shared lib mapping, not duplicated string literals
+  // hardcoded into the component.
+  assert.doesNotMatch(source, /"LightGBM"|"Croston-SBA"|"Conservative"/);
+});
+
+test("model health card explains the distinction between artifact health and method breakdown", () => {
+  const source = readFileSync(new URL("../components/ModelHealthCard.tsx", import.meta.url), "utf8");
+  assert.match(source, /tracks the active LightGBM artifact/);
+  assert.match(source, /replay performance/);
+});
+
+test("artifact-level Model Health metrics remain LightGBM-scoped even with a method breakdown present", () => {
+  const source = readFileSync(new URL("../components/ModelHealthCard.tsx", import.meta.url), "utf8");
+  assert.match(source, /LightGBM-artifact-scoped WAPE/);
+  assert.match(source, /LightGBM-artifact-scoped evaluations/);
 });
