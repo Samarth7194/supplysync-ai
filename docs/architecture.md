@@ -299,3 +299,28 @@ Evidence hierarchy:
 The primary routing metric is WAPE. Evidence must be recent, horizon-matching,
 sample-size sufficient, and materially better than the default method. Ties and
 small improvements keep the default method to avoid method flapping.
+
+## 13. MLOps: Monitoring, Retraining, Promotion, and Historical Replay
+
+The phases above (evidence-based routing, prediction logging, forecast
+evaluation) are the foundation for a larger controlled MLOps lifecycle added
+after this document's original sections were written. Rather than duplicate
+that design here, this section is a map to where it actually lives:
+
+```text
+prediction_logs (evaluated)
+  -> model_monitoring_snapshots      (rolling WAPE/bias, stable/warning/degraded)
+  -> retraining_runs                 (recommendation, evidence-gated)
+  -> CandidateTrainingService        (backend/src/services/candidate_training_service.py)
+  -> CandidateEvaluationService      (backend/src/services/candidate_evaluation_service.py)
+  -> ModelPromotionService           (backend/src/services/model_promotion_service.py)
+  -> model_promotion_events          (full audit trail, promotion or rollback)
+```
+
+- **Monitoring** — [`ModelMonitoringService`](../backend/src/services/model_monitoring_service.py), full design in [docs/mlops-monitoring.md](./mlops-monitoring.md).
+- **Retraining recommendation** — [`RetrainingDecisionService`](../backend/src/services/retraining_decision_service.py) — recommends only; `AUTO_RETRAIN_ENABLED=false` means nothing trains automatically.
+- **Candidate training/evaluation** — evidence-gated, never auto-promoted; see [docs/model-promotion.md](./model-promotion.md).
+- **Controlled promotion/rollback** — [`ModelPromotionService`](../backend/src/services/model_promotion_service.py) + [`scripts/promote_model.py`](../backend/scripts/promote_model.py) — human-run CLI only, preflight-validated (checksum, feature schema, deserialization), fully audited via `model_promotion_events`.
+- **Runtime resolution** — [`runtime_model_service.py`](../backend/src/services/runtime_model_service.py) — startup prefers a valid DB-active artifact, falls back to a configured local artifact, then to a statistical method.
+- **Operational cycle** — [`scripts/run_mlops_cycle.py`](../backend/scripts/run_mlops_cycle.py) — evaluates, monitors, and recommends on a schedule; never trains or promotes. See [docs/mlops-operations.md](./mlops-operations.md).
+- **Historical Monitoring Replay** — [`HistoricalMonitoringReplayService`](../backend/src/services/historical_monitoring_replay_service.py) — demonstrates the monitoring pipeline against held-out historical windows because the dataset is frozen and there is no live actual-demand feed. Never writes to the live tables above; see [docs/mlops-monitoring.md](./mlops-monitoring.md) for the full distinction from live monitoring.
