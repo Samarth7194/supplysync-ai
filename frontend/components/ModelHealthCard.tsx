@@ -13,6 +13,7 @@ import {
   formatSignedPercent,
   historicalReplayExplanation,
   monitoringExplanation,
+  orderedMethodBreakdown,
   selectModelHealthEvidence,
   usesOfflineBacktestBaseline,
 } from "@/lib/modelMonitoring";
@@ -40,6 +41,42 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
     <div className="flex items-baseline justify-between gap-3 text-xs">
       <span className="text-gray-500 uppercase tracking-wider">{label}</span>
       <span className="text-gray-300 text-right break-words">{value}</span>
+    </div>
+  );
+}
+
+function MethodPerformanceCard({ entry }: { entry: ReturnType<typeof orderedMethodBreakdown>[number] }) {
+  return (
+    <div className="rounded-lg border border-gray-800 bg-gray-950/60 p-3 min-w-0">
+      <p className="text-xs font-semibold text-white truncate">{entry.label}</p>
+      <p className="mt-1.5 text-[11px] text-gray-500">
+        {formatNumber(entry.skuCount, { maximumFractionDigits: 0 })} SKU{entry.skuCount === 1 ? "" : "s"}
+      </p>
+      <p className="mt-2 text-[10px] font-medium text-gray-500 uppercase tracking-wider">WAPE</p>
+      <p className="text-sm font-semibold text-white tabular-nums">{formatMonitoringMetric(entry.wape)}</p>
+    </div>
+  );
+}
+
+function MethodBreakdownSection({ replay }: { replay: HistoricalReplayResponse }) {
+  const entries = orderedMethodBreakdown(replay.method_breakdown);
+  if (entries.length === 0) return null;
+
+  return (
+    <div className="border-t border-gray-800 pt-3 space-y-2">
+      <div>
+        <p className="text-xs font-semibold text-white">Forecasting Method Performance</p>
+        <p className="text-[11px] text-gray-500 mt-1 leading-relaxed max-w-2xl">
+          SupplySync routes SKUs to different forecasting methods based on demand behavior. Model
+          Health above tracks the active LightGBM artifact; this breakdown shows replay performance
+          across all forecasting methods, across every replayed window.
+        </p>
+      </div>
+      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
+        {entries.map((entry) => (
+          <MethodPerformanceCard key={entry.method} entry={entry} />
+        ))}
+      </div>
     </div>
   );
 }
@@ -124,6 +161,8 @@ function HistoricalReplayCard({ replay }: { replay: HistoricalReplayResponse }) 
           )}
           <DetailRow label="Generated" value={formatMonitoringTime(replay.generated_at)} />
         </div>
+
+        <MethodBreakdownSection replay={replay} />
 
         <p className="rounded-lg border border-purple-500/20 bg-purple-500/10 px-3 py-2 text-xs text-purple-200 leading-relaxed">
           Historical replay demonstrates model monitoring using held-out historical demand.

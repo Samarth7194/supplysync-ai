@@ -162,3 +162,67 @@ export function formatReplayPeriod(period: { start?: string | null; end?: string
   if (!period?.start || !period?.end) return MONITORING_DASH;
   return `${period.start} → ${period.end}`;
 }
+
+// -- Forecasting method breakdown --------------------------------------------
+//
+// SupplySync routes each SKU to one of several forecasting methods based on
+// its demand pattern (regular -> LightGBM, intermittent -> Croston-SBA,
+// highly intermittent -> a conservative buffer). Model Health itself stays
+// scoped to the active LightGBM artifact; this mapping only controls how the
+// *separate*, informational method-breakdown section labels whatever methods
+// the replay payload actually reports — it never fabricates a method that
+// isn't present in the data.
+
+const FORECAST_METHOD_LABELS: Record<string, string> = {
+  ml_lightgbm: "LightGBM",
+  croston: "Croston-SBA",
+  conservative: "Conservative",
+  simple_average: "Simple Average",
+};
+
+// Preferred reading order (regular -> intermittent -> highly intermittent).
+// Only methods actually present in the payload are ever shown; this just
+// controls ordering when they are.
+const FORECAST_METHOD_ORDER = ["ml_lightgbm", "croston", "conservative", "simple_average"];
+
+export function formatForecastMethodLabel(method: string): string {
+  return (
+    FORECAST_METHOD_LABELS[method] ??
+    method
+      .split("_")
+      .map((part) => (part ? part[0].toUpperCase() + part.slice(1) : part))
+      .join(" ")
+  );
+}
+
+export interface MethodBreakdownEntry {
+  method: string;
+  label: string;
+  skuCount: number;
+  evaluationCount: number;
+  wape: number | null;
+}
+
+/**
+ * Turn the raw `method_breakdown` payload into an ordered, labeled list for
+ * display. Only methods actually present in `breakdown` are returned — this
+ * never invents a method the API didn't report (e.g. no Croston card renders
+ * if no SKU was ever routed to Croston in the replayed windows).
+ */
+export function orderedMethodBreakdown(
+  breakdown: Record<string, { sku_count: number; evaluation_count: number; wape: number | null }> | null | undefined,
+): MethodBreakdownEntry[] {
+  if (!breakdown) return [];
+  const keys = Object.keys(breakdown);
+  const ordered = [
+    ...FORECAST_METHOD_ORDER.filter((key) => keys.includes(key)),
+    ...keys.filter((key) => !FORECAST_METHOD_ORDER.includes(key)).sort(),
+  ];
+  return ordered.map((method) => ({
+    method,
+    label: formatForecastMethodLabel(method),
+    skuCount: breakdown[method].sku_count,
+    evaluationCount: breakdown[method].evaluation_count,
+    wape: breakdown[method].wape,
+  }));
+}
