@@ -18,12 +18,13 @@ import {
   demandSourceKind,
   forecastSourceKind,
 } from "@/components/DataSourceBadge";
-import type {
-  DemandSource,
-  ForecastSource,
-  DecisionBlock,
-  ModelInfo,
-  ExplanationBlock,
+import {
+  computeDemoStock,
+  type DemandSource,
+  type ForecastSource,
+  type DecisionBlock,
+  type ModelInfo,
+  type ExplanationBlock,
 } from "@/lib/api";
 import { EmptyState } from "@/components/EmptyState";
 import { InfoRow } from "@/components/InfoRow";
@@ -45,11 +46,6 @@ import {
 
 const API = env.apiUrl;
 const HISTORY_DAYS = 30;
-
-function computeDemoStock(avgDemand: number, index: number): number {
-  const multipliers = [0.3, 0.8, 2.0];
-  return Math.max(1, Math.round(avgDemand * multipliers[index % 3]));
-}
 
 function formatShortDate(iso?: string | null): string {
   if (!iso) return "—";

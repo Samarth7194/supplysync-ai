@@ -41,10 +41,3 @@ def compute_dynamic_safety_stock(
     """Safety stock from rolling forecast error, with uncertainty buffer."""
     z = float(stats.norm.ppf(service_level))
     return z * rolling_sigma * np.sqrt(lead_time_days) * error_buffer
-
-
-def estimate_demand_variance(demand_series: pd.Series, window_days: int = 30) -> float:
-    rolling_var = demand_series.rolling(window=window_days, min_periods=1).var().iloc[-1]
-    if pd.isna(rolling_var):
-        rolling_var = demand_series.var()
-    return float(rolling_var or 0.0)

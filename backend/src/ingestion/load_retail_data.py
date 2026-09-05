@@ -14,10 +14,6 @@ from typing import Dict, Optional, Union
 
 import pandas as pd
 
-# Canonical internal column names — matches UCI so downstream code doesn't
-# need to change. ``column_mapping`` maps user-side source names -> these.
-CANONICAL_COLUMNS = ("InvoiceDate", "Quantity", "StockCode", "Price", "Description")
-
 PathLike = Union[str, Path]
 
 

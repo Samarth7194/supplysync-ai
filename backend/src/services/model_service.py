@@ -262,27 +262,6 @@ class ModelService:
         
         self.logger.info(f"Features cached: {cache_key} with shape {features.shape}")
     
-    def get_cached_features(self, sku: str, cache_name: str = "latest") -> Optional[pd.DataFrame]:
-        """
-        Get cached features for a SKU.
-        
-        Parameters:
-        - sku: SKU identifier
-        - cache_name: Name for the cache entry
-        
-        Returns:
-        - Cached features or None if not found
-        """
-        
-        cache_key = f"{sku}_{cache_name}"
-        
-        if cache_key in self._feature_cache:
-            features = self._feature_cache[cache_key]
-            self.logger.info(f"Features retrieved from cache: {cache_key}")
-            return features
-        
-        return None
-    
     def clear_cache(self, model_name: Optional[str] = None) -> None:
         """
         Clear model and/or feature cache.
@@ -316,95 +295,6 @@ class ModelService:
         
         return sorted(model_names)
     
-    def get_model_info(self) -> Dict:
-        """
-        Get information about all models.
-        
-        Returns:
-        - Dictionary with model information
-        """
-        
-        models = self.list_available_models()
-        model_info = {}
-        
-        for model_name in models:
-            metadata = self.get_model_metadata(model_name)
-            model_info[model_name] = {
-                "cached": model_name in self._model_cache,
-                "metadata": metadata
-            }
-        
-        return model_info
-    
-    def log_decision(self, decision: Dict, context: Optional[Dict] = None) -> None:
-        """
-        Log inventory decision with structured format.
-        
-        Parameters:
-        - decision: Reorder decision dictionary
-        - context: Additional context (timestamp, user, etc.)
-        """
-        
-        log_entry = {
-            "timestamp": datetime.now().isoformat(),
-            "sku": decision.get("sku"),
-            "action": decision.get("action"),
-            "order_quantity": decision.get("order_quantity"),
-            "current_stock": decision.get("current_stock"),
-            "reorder_point": decision.get("reorder_point"),
-            "safety_stock": decision.get("safety_stock"),
-            "lead_time_demand": decision.get("lead_time_demand"),
-            "forecast_method": decision.get("intelligence", {}).get("forecast_method"),
-            "demand_pattern": decision.get("intelligence", {}).get("demand_pattern"),
-            "risk_appetite": decision.get("intelligence", {}).get("risk_appetite"),
-            "business_constraints_applied": decision.get("business_constraints") is not None
-        }
-        
-        if context:
-            log_entry.update(context)
-        
-        self.logger.info(f"Inventory Decision: {json.dumps(log_entry, indent=2)}")
-    
-    def log_forecast_accuracy(self, sku: str, actual: float, predicted: float, error: float) -> None:
-        """
-        Log forecast accuracy for monitoring.
-        
-        Parameters:
-        - sku: SKU identifier
-        - actual: Actual demand
-        - predicted: Predicted demand
-        - error: Forecast error
-        """
-        
-        log_entry = {
-            "timestamp": datetime.now().isoformat(),
-            "event_type": "forecast_accuracy",
-            "sku": sku,
-            "actual_demand": actual,
-            "predicted_demand": predicted,
-            "absolute_error": abs(error),
-            "percentage_error": round((abs(error) / actual * 100) if actual > 0 else 0, 2)
-        }
-        
-        self.logger.info(f"Forecast Accuracy: {json.dumps(log_entry, indent=2)}")
-    
-    def get_system_health(self) -> Dict:
-        """
-        Get system health status.
-        
-        Returns:
-        - System health information
-        """
-        
-        return {
-            "timestamp": datetime.now().isoformat(),
-            "cached_models": len(self._model_cache),
-            "cached_features": len(self._feature_cache),
-            "available_models": len(self.list_available_models()),
-            "model_directory_exists": self.model_dir.exists(),
-            "model_directory_path": str(self.model_dir)
-        }
-
 # Global model service instance
 _model_service = None
 

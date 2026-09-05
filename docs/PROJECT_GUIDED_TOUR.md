@@ -383,7 +383,7 @@ The newer database foundation is:
 - [backend/src/db/models.py](../backend/src/db/models.py)
 - [backend/src/db/session.py](../backend/src/db/session.py)
 - [backend/src/repositories/stock_repository.py](../backend/src/repositories/stock_repository.py)
-- [backend/alembic/versions/50f995297bfe_initial_inventory_schema.py](../backend/alembic/versions/50f995297bfe_initial_inventory_schema.py)
+- [backend/alembic/versions/](../backend/alembic/versions/) (migration chain, current head `9b1a4c6d8e2f`)
 - [docs/database-design.md](./database-design.md)
 
 The schema includes tables for:
@@ -394,7 +394,8 @@ The schema includes tables for:
 - analysis runs,
 - prediction logs,
 - forecast evaluations,
-- model artifacts.
+- model artifacts,
+- model promotion events, model monitoring snapshots, and retraining runs (the MLOps lifecycle tables — see [docs/mlops-monitoring.md](./mlops-monitoring.md) and [docs/model-promotion.md](./model-promotion.md)).
 
 Server-side stock endpoints, analysis history, and prediction logs all use the service/repository/SQLAlchemy path. The FastAPI runtime does not keep a secondary SQLite analysis-store fallback.
 
@@ -499,7 +500,11 @@ Demo or limited:
 - Authentication is demo-grade, not production identity.
 - Frontend stock falls back to browser storage only as degraded demo behavior when no server-side value is available.
 
-Future scope:\r\n\r\n- More logged prediction evaluations as forecast windows mature.\r\n- Manual model promotion is CLI-only; there is no admin UI.\r\n- Production identity, organization boundaries, and operational monitoring are intentionally out of scope for the current student-scale monolith.
+Future scope:
+
+- More logged prediction evaluations as forecast windows mature.
+- Manual model promotion is CLI-only; there is no admin UI.
+- Production identity and organization boundaries are intentionally out of scope for the current student-scale monolith.
 
 ## 14. What Should Be Improved Next?
 
@@ -508,7 +513,8 @@ The highest-value next improvement is to make the deployment workflow easier to 
 Why:
 
 - The service/repository boundary now exists.
-- Local setup should stay simple enough that the owner can run and explain it without Docker.\r\n- Deployment docs should clearly separate required secrets from optional demo-auth settings.
+- Local setup should stay simple enough that the owner can run and explain it without Docker.
+- Deployment docs should clearly separate required secrets from optional demo-auth settings.
 
 ```text
 HTTP route

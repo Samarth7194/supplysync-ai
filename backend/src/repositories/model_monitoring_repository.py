@@ -29,9 +29,6 @@ class ModelMonitoringRepository:
         )
         return self.session.scalar(stmt)
 
-    def get_model_artifact(self, artifact_id: int) -> ModelArtifact | None:
-        return self.session.get(ModelArtifact, artifact_id)
-
     def latest_evaluated_model_artifact(self, model_name: str) -> ModelArtifact | None:
         stmt = (
             select(ModelArtifact)

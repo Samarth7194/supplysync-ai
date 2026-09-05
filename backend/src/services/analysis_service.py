@@ -845,11 +845,7 @@ class AnalysisService:
         artifact_path = self.model_dir / "lightgbm_demand_forecast.pkl"
         if not artifact_path.exists():
             return None
-        digest = hashlib.sha256()
-        with artifact_path.open("rb") as fh:
-            for chunk in iter(lambda: fh.read(1024 * 1024), b""):
-                digest.update(chunk)
-        return digest.hexdigest()
+        return ModelService.checksum_file(artifact_path)
 
     def _checksum_version(self) -> str | None:
         checksum = self._artifact_checksum()
