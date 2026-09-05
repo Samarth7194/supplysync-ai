@@ -1,8 +1,7 @@
 # src/uncertainty/prediction_intervals.py
 
-import numpy as np
 import pandas as pd
-from typing import Dict, List, Tuple
+from typing import Dict, List
 from scipy import stats
 
 def compute_residual_statistics(residuals: pd.Series) -> Dict:
@@ -47,39 +46,27 @@ def compute_prediction_intervals(
     - point_forecast: Point forecast value
     - residual_stats: Statistics of forecast residuals
     - confidence_levels: List of confidence levels for intervals
-    - method: Method for interval calculation ('normal', 'empirical', 'bootstrap')
-    
+    - method: Method for interval calculation. Only 'normal' is implemented;
+      other values return no intervals.
+
     Returns:
     - Dictionary with prediction intervals
     """
-    
+
     intervals = {}
-    
+
     if method == "normal":
         # Normal distribution assumption
         std_error = residual_stats["std"]
-        
+
         for confidence in confidence_levels:
             z_score = stats.norm.ppf((1 + confidence) / 2)
             margin = z_score * std_error
-            
+
             intervals[f"lower_{int(confidence*100)}"] = max(0, point_forecast - margin)
             intervals[f"upper_{int(confidence*100)}"] = point_forecast + margin
             intervals[f"mean_{int(confidence*100)}"] = point_forecast
-    
-    elif method == "empirical":
-        # Empirical quantiles from residuals
-        for confidence in confidence_levels:
-            alpha = 1 - confidence
-            lower_quantile = residual_stats.get(f"q{int((alpha/2)*100)}", 
-                                              residuals_clean.quantile(alpha/2) if 'residuals_clean' in locals() else 0)
-            upper_quantile = residual_stats.get(f"q{int((1-alpha/2)*100)}", 
-                                              residuals_clean.quantile(1-alpha/2) if 'residuals_clean' in locals() else std_error)
-            
-            intervals[f"lower_{int(confidence*100)}"] = max(0, point_forecast + lower_quantile)
-            intervals[f"upper_{int(confidence*100)}"] = point_forecast + upper_quantile
-            intervals[f"mean_{int(confidence*100)}"] = point_forecast
-    
+
     return intervals
 
 def uncertainty_aware_reorder_decision(
@@ -141,46 +128,3 @@ def uncertainty_aware_reorder_decision(
     })
     
     return uncertain_decision
-
-def compute_forecast_uncertainty_metrics(
-    actuals: pd.Series,
-    forecasts: pd.Series,
-    prediction_intervals: Dict = None
-) -> Dict:
-    """
-    Compute metrics to quantify forecast uncertainty quality.
-    
-    Parameters:
-    - actuals: Actual values
-    - forecasts: Point forecasts
-    - prediction_intervals: Prediction intervals (optional)
-    
-    Returns:
-    - Dictionary of uncertainty metrics
-    """
-    
-    # Basic accuracy metrics
-    mae = np.mean(np.abs(actuals - forecasts))
-    rmse = np.sqrt(np.mean((actuals - forecasts) ** 2))
-    mape = np.mean(np.abs((actuals - forecasts) / actuals.replace(0, np.nan))) * 100
-    
-    metrics = {
-        "mae": round(mae, 3),
-        "rmse": round(rmse, 3),
-        "mape": round(mape, 2),
-        "forecast_bias": round(np.mean(actuals - forecasts), 3)
-    }
-    
-    # Interval coverage if available
-    if prediction_intervals:
-        for confidence in [80, 90, 95]:
-            lower_key = f"lower_{confidence}"
-            upper_key = f"upper_{confidence}"
-            
-            if lower_key in prediction_intervals and upper_key in prediction_intervals:
-                coverage = np.mean((actuals >= prediction_intervals[lower_key]) & 
-                                 (actuals <= prediction_intervals[upper_key]))
-                metrics[f"coverage_{confidence}"] = round(coverage, 3)
-                metrics[f"target_coverage_{confidence}"] = confidence / 100
-    
-    return metrics

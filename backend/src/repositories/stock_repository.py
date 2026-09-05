@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 from decimal import Decimal
-from typing import Any
 
 from sqlalchemy import func, select
 from sqlalchemy.orm import Session
@@ -88,14 +87,3 @@ class StockRepository:
             .order_by(Sku.sku_code.asc())
         )
         return list(self.session.scalars(stmt))
-
-    @staticmethod
-    def serialize(stock: StockLevel) -> dict[str, Any]:
-        return {
-            "sku": stock.sku.sku_code if stock.sku else None,
-            "quantity_on_hand": float(stock.quantity_on_hand),
-            "quantity_reserved": float(stock.quantity_reserved),
-            "quantity_available": float(stock.quantity_available),
-            "source": stock.source,
-            "recorded_at": stock.recorded_at.isoformat() if stock.recorded_at else None,
-        }

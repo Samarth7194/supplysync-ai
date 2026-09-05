@@ -40,5 +40,5 @@ demo: install bootstrap
 
 clean:
 	rm -f data/processed/*.parquet
-	rm -f backend/data/analyses.sqlite*
+	rm -f backend/data/supplysync.db*
 	rm -rf frontend/.next frontend/out

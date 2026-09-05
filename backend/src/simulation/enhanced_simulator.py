@@ -2,10 +2,9 @@
 
 import pandas as pd
 import numpy as np
-from typing import Dict, List, Tuple, Optional
+from typing import List, Tuple, Optional
 from dataclasses import dataclass
 from inventory.reorder_point import compute_reorder_decision
-from services.adaptive_forecasting_service import adaptive_forecast, classify_sku_demand_pattern
 from services.intelligent_inventory_service import IntelligentInventoryService
 
 @dataclass
@@ -191,111 +190,3 @@ class EnhancedInventorySimulator:
             inventory_timeseries=inventory_timeseries,
             reorder_events=reorder_events
         )
-    
-    def compare_policies(
-        self,
-        sku_df: pd.DataFrame,
-        intelligent_service: IntelligentInventoryService,
-        lead_time_days: int = 7,
-        forecast_horizon: int = 7
-    ) -> Dict[str, SimulationResults]:
-        """
-        Compare all three policies on the same data.
-        
-        Parameters:
-        - sku_df: Demand data for SKU
-        - intelligent_service: Trained intelligent inventory service
-        - lead_time_days: Supplier lead time
-        - forecast_horizon: Forecast horizon for ML policy
-        
-        Returns:
-        - Dictionary of results by policy name
-        """
-        
-        results = {}
-        
-        # 1. Naive Policy
-        results["naive"] = self.simulate_policy(
-            sku_df=sku_df,
-            policy_fn=self.naive_policy,
-            policy_name="naive",
-            lead_time_days=lead_time_days,
-            reorder_threshold=20,
-            reorder_qty=50
-        )
-        
-        # 2. ML Forecast Policy
-        # Generate simple forecasts for demonstration
-        demand_series = sku_df["demand"]
-        sigma = demand_series.std()
-        
-        # Simple moving average forecast
-        forecast = [demand_series.tail(7).mean()] * forecast_horizon
-        
-        results["ml_forecast"] = self.simulate_policy(
-            sku_df=sku_df,
-            policy_fn=self.ml_forecast_policy,
-            policy_name="ml_forecast",
-            lead_time_days=lead_time_days,
-            forecast=forecast,
-            sigma=sigma
-        )
-        
-        # 3. Intelligent Policy
-        results["intelligent"] = self.simulate_policy(
-            sku_df=sku_df,
-            policy_fn=self.intelligent_policy,
-            policy_name="intelligent",
-            lead_time_days=lead_time_days,
-            intelligent_service=intelligent_service
-        )
-        
-        return results
-    
-    def generate_performance_report(self, results: Dict[str, SimulationResults]) -> Dict:
-        """
-        Generate a comprehensive performance report.
-        
-        Parameters:
-        - results: Simulation results by policy
-        
-        Returns:
-        - Dictionary with performance insights
-        """
-        
-        # Calculate improvements
-        naive_cost = results["naive"].total_cost
-        ml_cost = results["ml_forecast"].total_cost
-        intelligent_cost = results["intelligent"].total_cost
-        
-        ml_improvement = ((naive_cost - ml_cost) / naive_cost) * 100
-        intelligent_improvement = ((naive_cost - intelligent_cost) / naive_cost) * 100
-        ml_vs_intelligent = ((ml_cost - intelligent_cost) / ml_cost) * 100
-        
-        return {
-            "cost_analysis": {
-                "naive_cost": naive_cost,
-                "ml_forecast_cost": ml_cost,
-                "intelligent_cost": intelligent_cost,
-                "ml_vs_naive_improvement_pct": round(ml_improvement, 2),
-                "intelligent_vs_naive_improvement_pct": round(intelligent_improvement, 2),
-                "intelligent_vs_ml_improvement_pct": round(ml_vs_intelligent, 2)
-            },
-            "service_analysis": {
-                "best_service_level": max(results.keys(), key=lambda k: results[k].service_level),
-                "best_fill_rate": max(results.keys(), key=lambda k: results[k].fill_rate),
-                "lowest_stockouts": min(results.keys(), key=lambda k: results[k].stockouts)
-            },
-            "efficiency_analysis": {
-                "lowest_avg_inventory": min(results.keys(), key=lambda k: results[k].avg_inventory_level),
-                "inventory_efficiency": {
-                    policy: round(results[policy].total_cost / results[policy].avg_inventory_level, 2)
-                    for policy in results.keys()
-                }
-            },
-            "recommendation": {
-                "best_overall": min(results.keys(), key=lambda k: results[k].total_cost),
-                "best_for_service": max(results.keys(), key=lambda k: results[k].service_level),
-                "most_efficient": min(results.keys(), key=lambda k: results[k].avg_inventory_level)
-            }
-        }

@@ -27,7 +27,7 @@ Open `http://localhost:3000`.
 | `npm run start` | Serve the production build |
 | `npm run lint` | ESLint with `eslint-config-next` |
 | `npm run typecheck` | `tsc --noEmit` |
-| `npm test` | Typecheck + lint |
+| `npm test` | Runs the test suite in `tests/`, then typecheck, then lint |
 | `npm run clean` | Remove local build artifacts |
 
 ## Structure
@@ -40,15 +40,20 @@ frontend/
 |   |-- sku/[id]/page.tsx
 |   `-- globals.css
 |-- components/
-|   `-- DataSourceBadge.tsx
-|-- hooks/
-|   `-- use-mobile.ts
+|   |-- AuthGate.tsx
+|   |-- DataSourceBadge.tsx
+|   |-- EmptyState.tsx
+|   |-- InfoRow.tsx
+|   |-- ModelHealthCard.tsx
+|   `-- SectionHeader.tsx
 |-- lib/
 |   |-- api.ts
 |   |-- env.ts
+|   |-- modelMonitoring.ts
 |   |-- stock.ts
 |   `-- utils.ts
-|-- public/
+|-- tests/
+|   `-- modelMonitoring.test.mts
 |-- next.config.ts
 |-- tsconfig.json
 `-- package.json

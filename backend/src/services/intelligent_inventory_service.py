@@ -3,14 +3,12 @@
 import logging
 import pandas as pd
 import numpy as np
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 from services.adaptive_forecasting_service import adaptive_forecast, get_sku_classification_metadata
 from inventory.reorder_point import compute_reorder_decision
 from inventory.business_constraints import (
     apply_business_constraints,
-    optimize_across_budget,
     SupplierConstraints,
-    BudgetConstraints,
     get_default_supplier_constraints
 )
 from uncertainty.dynamic_sigma import compute_rolling_forecast_error, compute_dynamic_safety_stock
@@ -18,7 +16,6 @@ from uncertainty.prediction_intervals import (
     compute_residual_statistics,
     compute_prediction_intervals,
     uncertainty_aware_reorder_decision,
-    compute_forecast_uncertainty_metrics
 )
 
 logger = logging.getLogger(__name__)
@@ -240,96 +237,3 @@ class IntelligentInventoryService:
         constrained_decision["forecast_daily"] = [round(float(v), 2) for v in forecast]
 
         return constrained_decision
-    
-    def batch_reorder_decisions(
-        self,
-        sku_data: Dict[str, Dict],
-        lead_time_days: int = 7,
-        service_level: float = 0.95,
-        budget_constraints: Optional[BudgetConstraints] = None
-    ) -> Dict[str, Dict]:
-        """
-        Generate batch reorder decisions for multiple SKUs with optional budget optimization.
-        
-        Parameters:
-        - sku_data: Dictionary with SKU as key and metadata as value
-        - lead_time_days: Supplier lead time
-        - service_level: Target service level
-        - budget_constraints: Optional budget constraints for optimization
-        
-        Returns:
-        - Dictionary of decisions by SKU
-        """
-        
-        decisions = {}
-        supplier_constraints_by_sku: Dict[str, SupplierConstraints] = {}
-
-        for sku, data in sku_data.items():
-            try:
-                sc = data.get("supplier_constraints")
-                if sc is not None:
-                    supplier_constraints_by_sku[sku] = sc
-                decision = self.get_intelligent_reorder_decision(
-                    sku=sku,
-                    current_stock=data["current_stock"],
-                    demand_history=data["demand_history"],
-                    lead_time_days=lead_time_days,
-                    service_level=service_level,
-                    last_features=data.get("last_features"),
-                    forecast_history=data.get("forecast_history"),
-                    supplier_constraints=sc,
-                )
-                decisions[sku] = decision
-            except Exception as e:
-                logger.warning("Error processing SKU %s: %s", sku, e)
-                decisions[sku] = {"error": str(e)}
-
-        if budget_constraints is not None:
-            decisions = optimize_across_budget(
-                decisions=decisions,
-                budget_constraints=budget_constraints,
-                supplier_constraints=supplier_constraints_by_sku,
-            )
-
-        return decisions
-    
-    def get_system_performance_summary(self, decisions: Dict[str, Dict]) -> Dict:
-        """
-        Generate summary of system performance across all SKUs.
-        
-        Parameters:
-        - decisions: Dictionary of reorder decisions
-        
-        Returns:
-        - Performance summary
-        """
-        
-        total_skus = len(decisions)
-        reorder_skus = sum(1 for d in decisions.values() if d.get("action") == "REORDER")
-        
-        # Count by demand pattern
-        pattern_counts = {}
-        for decision in decisions.values():
-            if "intelligence" in decision:
-                pattern = decision["intelligence"]["demand_pattern"]
-                pattern_counts[pattern] = pattern_counts.get(pattern, 0) + 1
-        
-        # Safety stock methods
-        safety_methods = {}
-        for decision in decisions.values():
-            method = decision.get("safety_stock_method", "unknown")
-            safety_methods[method] = safety_methods.get(method, 0) + 1
-        
-        return {
-            "total_skus_processed": total_skus,
-            "skus_requiring_reorder": reorder_skus,
-            "reorder_rate": round(reorder_skus / total_skus, 3) if total_skus > 0 else 0,
-            "demand_pattern_distribution": pattern_counts,
-            "safety_stock_method_distribution": safety_methods,
-            "intelligent_features": {
-                "adaptive_forecasting": True,
-                "dynamic_safety_stock": True,
-                "sku_classification": True,
-                "explainability": True
-            }
-        }

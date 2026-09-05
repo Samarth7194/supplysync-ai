@@ -64,7 +64,26 @@ skus
   | optional many evaluations per SKU
   v
 forecast_evaluations
+
+model_artifacts
+  |
+  | 1-to-many
+  v
+model_monitoring_snapshots
+  |
+  | 1-to-many
+  v
+retraining_runs
+  |
+  | 0-to-many (only completed + promotion_recommended rows are eligible)
+  v
+model_promotion_events
 ```
+
+The MLOps lifecycle tables (`model_monitoring_snapshots`, `retraining_runs`,
+`model_promotion_events`) were added after the tables above; see the
+dedicated subsections under `model_artifacts` below, and
+`docs/mlops-monitoring.md` / `docs/model-promotion.md` for the full design.
 
 ## Tables
 
@@ -392,10 +411,61 @@ Relationships:
 
 Lifecycle rules:
 
-- Training produces a candidate artifact.
-- Promotion is explicit through `scripts/promote_model.py`.
-- Promotion retires previous active artifacts in the same transaction.
-- Retired artifacts remain referenced by historical prediction logs.
+- Training produces a candidate artifact (`lifecycle_status = candidate`).
+- Promotion is explicit, human-controlled, and evidence-gated through
+  `scripts/promote_model.py` — a candidate is not promotable merely because it
+  exists; it requires a completed, eligible `retraining_runs` row. See
+  `docs/model-promotion.md` for the full precondition list.
+- Promotion retires the previous active artifact in the same transaction,
+  ordered to never violate the one-active-artifact-per-`model_name` unique
+  index (deactivate target, flush, reactivate previous only on rollback).
+- Retired artifacts remain referenced by historical prediction logs and are
+  never deleted.
+- Every promotion or rollback writes one row to `model_promotion_events` (see
+  below) — the lifecycle change itself is auditable, not just the resulting
+  state.
+
+### `model_promotion_events`
+
+Audit trail for every promotion/rollback operation. Written only by the
+explicit, human-controlled `scripts/promote_model.py` CLI — no scheduler,
+monitoring job, or public API route writes this table. See
+`docs/model-promotion.md` for the full lifecycle and CLI usage.
+
+Key columns: `event_type` (`promotion` or `rollback`), `model_name`,
+`promoted_model_artifact_id`, `previous_model_artifact_id`,
+`retraining_run_id` (nullable — null for rollback), `outcome` (`pending`,
+`succeeded`, or `handoff_failed_restored`), `initiated_by`, `reason`,
+`created_at`.
+
+### `model_monitoring_snapshots`
+
+Rolling forecast-performance monitoring evidence, computed only from
+completed `forecast_evaluations` for a model scope. See
+`docs/mlops-monitoring.md` for the full metric/threshold design.
+
+Key columns: `model_artifact_id`, `model_name`, `model_version`,
+`window_type`, `window_size`, `evaluation_count`, `metric_wape`/`metric_mae`/
+`metric_rmse`/`metric_bias`/`metric_mase`, `baseline_wape`,
+`baseline_provenance` (`promotion_evidence`, `artifact_metadata`,
+`offline_backtest`, or `unavailable`), `status`
+(`insufficient_evidence`/`stable`/`warning`/`degraded`),
+`consecutive_degradation_count`, `evidence_key` (unique — makes snapshot
+creation idempotent for the same evidence).
+
+### `retraining_runs`
+
+Tracks retraining recommendations and, once controlled candidate training
+runs, links each candidate's evaluation outcome back to the monitoring
+evidence that triggered it. See `docs/mlops-monitoring.md` (recommendation)
+and `docs/model-promotion.md` (how a run becomes eligible for promotion).
+
+Key columns: `trigger_reason`, `status`
+(`recommended`/`pending`/`running`/`completed`/`failed`/`rejected`),
+`baseline_model_artifact_id`, `source_monitoring_snapshot_id`,
+`new_evaluated_forecast_days`, `candidate_model_artifact_id`,
+`promotion_recommended`, `evidence_key` (unique — prevents duplicate
+recommendations for the same evidence).
 
 ## Main Runtime Queries
 

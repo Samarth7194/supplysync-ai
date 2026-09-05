@@ -82,16 +82,6 @@ class AnalysisRepository:
         stmt = select(AnalysisRun).order_by(AnalysisRun.created_at.desc(), AnalysisRun.id.desc()).limit(limit)
         return list(self.session.scalars(stmt))
 
-    def recent_for_sku(self, sku_code: str, limit: int = 20) -> list[AnalysisRun]:
-        limit = max(1, min(int(limit), 200))
-        stmt = (
-            select(AnalysisRun)
-            .where(AnalysisRun.sku_code == sku_code)
-            .order_by(AnalysisRun.created_at.desc(), AnalysisRun.id.desc())
-            .limit(limit)
-        )
-        return list(self.session.scalars(stmt))
-
     def count(self) -> int:
         return int(self.session.scalar(select(func.count(AnalysisRun.id))) or 0)
 

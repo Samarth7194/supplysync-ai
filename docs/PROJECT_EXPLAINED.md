@@ -223,6 +223,9 @@ Model metadata includes model name, version, checksum, feature schema version, a
 - `prediction_logs`: forecast audit rows linked to analyses.
 - `forecast_evaluations`: model/method evaluation evidence.
 - `model_artifacts`: artifact lifecycle metadata.
+- `model_promotion_events`: audit trail for promotion/rollback operations.
+- `model_monitoring_snapshots`: rolling forecast-performance monitoring evidence.
+- `retraining_runs`: retraining recommendation and candidate-evaluation tracking.
 
 Relationships:
 
@@ -294,9 +297,9 @@ Best next improvements:
 
 - Clearer deployment checklist for non-Docker local machines.
 - More logged-prediction evaluation examples once windows mature.
-- Better admin workflow for model promotion.
+- Better admin workflow for model promotion (today it is explicit, human-controlled CLI by design — see docs/model-promotion.md).
 - Production-grade auth only if the app needs real users.
-- Monitoring and structured logs after deployment basics are stable.
+- A scheduled production job for the MLOps operational cycle (docs/mlops-operations.md) — the cycle itself is implemented, but no cron is configured yet.
 
 ## 33. Viva And Interview Questions
 
@@ -335,7 +338,7 @@ Best next improvements:
 33. What is a model artifact checksum? A hash proving the loaded model file matches recorded metadata.
 34. Why version model artifacts? To trace which model produced a prediction.
 35. What does Alembic do? Manages database schema migrations.
-36. What tables matter most? `skus`, `stock_levels`, `analysis_runs`, `prediction_logs`, `forecast_evaluations`, `model_artifacts`.
+36. What tables matter most? `skus`, `stock_levels`, `analysis_runs`, `prediction_logs`, `forecast_evaluations`, `model_artifacts`, plus the MLOps lifecycle tables `model_promotion_events`, `model_monitoring_snapshots`, and `retraining_runs`.
 37. Why keep SQLite for tests? It is lightweight and fast for local test isolation.
 38. Why use PostgreSQL for deployment? It is the production-oriented relational database target.
 39. What does `/health` prove? Model, data, KPI, DB, and artifact readiness.

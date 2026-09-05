@@ -30,24 +30,6 @@ export interface ModelInfo {
   evaluation_generated_at?: string | null;
 }
 
-export interface ModelInfoResponse {
-  model_name: string;
-  model_type: ModelType;
-  artifact_available: boolean;
-  trained_at: string | null;
-  dataset: string | null;
-  feature_count: number | null;
-  features: string[] | null;
-  train_skus: string[] | null;
-  training_metrics: { mae?: number | null; rmse?: number | null };
-  evaluation: {
-    available: boolean;
-    generated_at: string | null;
-    summary: Record<string, number | null> | null;
-  };
-  hint: string | null;
-}
-
 export interface ExplanationBlock {
   classification_reason: string;
   method_reason: string;
@@ -377,10 +359,6 @@ export class ApiClient {
     return this.request(`/api/skus/${encodeURIComponent(sku)}/history?days=${days}`);
   }
 
-  async getModelInfo(): Promise<ModelInfoResponse> {
-    return this.request("/api/model-info");
-  }
-
   async getModelMonitoring(): Promise<ModelMonitoringSnapshot> {
     return this.request(MODEL_MONITORING_ENDPOINT);
   }
@@ -427,10 +405,6 @@ export class ApiClient {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ username, password }),
     });
-  }
-
-  async logout(): Promise<{ ok: boolean }> {
-    return this.request("/api/auth/logout", { method: "POST" });
   }
 
 }

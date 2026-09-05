@@ -33,7 +33,7 @@ backend/
 │   ├── evaluate_cross_sku.py   # NEW — unseen-SKU k-fold generalization test
 │   └── evaluate_custom_dataset.py  # NEW — zero-shot evaluation on any compatible CSV
 ├── saved_models/               # lightgbm_demand_forecast.pkl + _metadata.json
-├── data/                       # cached_kpis.json, forecast_evaluation.{json,csv}, analyses.sqlite
+├── data/                       # cached_kpis.json, forecast_evaluation.{json,csv}, historical_monitoring_replay.json (local dev DB: data/supplysync.db)
 └── tests/                      # 100+ pytest cases
 ```
 
