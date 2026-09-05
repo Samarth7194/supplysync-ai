@@ -1,0 +1,85 @@
+{
+  "provenance": "historical_replay",
+  "generated_at": "2026-09-04T16:51:24.824278+00:00",
+  "model_name": "lightgbm_demand_forecast",
+  "model_artifact_id": null,
+  "model_version": "lightgbm_demand_forecast-20260523T084002Z-ea7815fa9a33",
+  "horizon_days": 7,
+  "sku_count": 59,
+  "window_count": 3,
+  "status": "warning",
+  "degradation_reason": "wape_warning_threshold_exceeded",
+  "degradation_message": "Recent WAPE is 17.4% worse than baseline. Baseline provenance is offline_backtest, so this is a bootstrap comparison, not live production truth.",
+  "evaluation_count": 39,
+  "metric_wape": 1.2507646497510045,
+  "metric_mae": 92.22671208603562,
+  "metric_rmse": 228.4911777756881,
+  "metric_bias": 21.117258662538312,
+  "metric_mase": 1.2341948717948719,
+  "residual_mean": -21.117258662538312,
+  "residual_std": 227.93109091746715,
+  "baseline_wape": 1.0655,
+  "baseline_provenance": "offline_backtest",
+  "wape_relative_change": 0.17387578578226623,
+  "bias_ratio": 0.2863890519062573,
+  "consecutive_degradation_count": 0,
+  "historical_period": {
+    "start": "2011-11-19",
+    "end": "2011-12-09"
+  },
+  "method_breakdown": {
+    "ml_lightgbm": {
+      "sku_count": 47,
+      "evaluation_count": 133,
+      "wape": 1.1370213346773157
+    },
+    "croston": {
+      "sku_count": 11,
+      "evaluation_count": 31,
+      "wape": 0.7898414212097774
+    },
+    "conservative": {
+      "sku_count": 1,
+      "evaluation_count": 3,
+      "wape": 4.063720930232559
+    }
+  },
+  "windows": [
+    {
+      "window_index": 0,
+      "anchor_date": "2011-11-18",
+      "target_start": "2011-11-19",
+      "target_end": "2011-11-25",
+      "status": "stable",
+      "degradation_reason": "wape_within_baseline",
+      "consecutive_degradation_count": 0,
+      "metric_wape": 1.0948828504642347,
+      "evaluation_count": 47,
+      "sku_count": 59
+    },
+    {
+      "window_index": 1,
+      "anchor_date": "2011-11-25",
+      "target_start": "2011-11-26",
+      "target_end": "2011-12-02",
+      "status": "warning",
+      "degradation_reason": "bias_warning",
+      "consecutive_degradation_count": 0,
+      "metric_wape": 1.08139065863978,
+      "evaluation_count": 47,
+      "sku_count": 59
+    },
+    {
+      "window_index": 2,
+      "anchor_date": "2011-12-02",
+      "target_start": "2011-12-03",
+      "target_end": "2011-12-09",
+      "status": "warning",
+      "degradation_reason": "wape_warning_threshold_exceeded",
+      "consecutive_degradation_count": 0,
+      "metric_wape": 1.2507646497510045,
+      "evaluation_count": 39,
+      "sku_count": 49
+    }
+  ]
+}

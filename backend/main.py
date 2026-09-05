@@ -345,6 +345,67 @@ class ModelMonitoringHistoryResponse(BaseModel):
     count: int
 
 
+class HistoricalReplayMetrics(BaseModel):
+    wape: Optional[float] = None
+    mae: Optional[float] = None
+    rmse: Optional[float] = None
+    bias: Optional[float] = None
+    mase: Optional[float] = None
+
+
+class HistoricalReplayPeriod(BaseModel):
+    start: Optional[str] = None
+    end: Optional[str] = None
+
+
+class LiveMonitoringSummary(BaseModel):
+    available: bool
+    evaluation_count: int = 0
+
+
+class HistoricalReplayResponse(BaseModel):
+    """Historical holdout replay evidence — NEVER live production monitoring.
+
+    Generated offline by ``scripts/run_historical_monitoring_replay.py`` and
+    served here read-only from a cached JSON file. See docs/mlops-monitoring.md
+    for why this exists: the processed dataset is historical and there is no
+    connected ERP/POS actual-demand stream, so live predictions cannot yet
+    mature into real evaluations.
+    """
+    mode: str = "historical_replay"
+    available: bool
+    model_name: Optional[str] = None
+    model_artifact_id: Optional[int] = None
+    model_version: Optional[str] = None
+    status: Optional[str] = None
+    degradation_reason: Optional[str] = None
+    degradation_message: Optional[str] = None
+    metrics: HistoricalReplayMetrics = Field(default_factory=HistoricalReplayMetrics)
+    baseline_wape: Optional[float] = None
+    baseline_provenance: Optional[str] = None
+    # evaluation_count/status/metrics above are scoped to the LATEST replay
+    # window and to LightGBM-artifact-routed SKUs only (mirrors live
+    # monitoring's "one snapshot = one window" semantics).
+    evaluation_count: int = 0
+    forecast_days: Optional[int] = None
+    horizon_days: Optional[int] = None
+    # sku_count is broader than evaluation_count on purpose: it's the unique
+    # SKU count across ALL replayed windows and ALL routing methods
+    # (LightGBM + Croston + conservative), not just the latest-window
+    # LightGBM-scoped subset that evaluation_count/status describe. See
+    # method_breakdown for the per-method, all-windows detail.
+    sku_count: Optional[int] = None
+    historical_period: HistoricalReplayPeriod = Field(default_factory=HistoricalReplayPeriod)
+    generated_at: Optional[str] = None
+    provenance: str = "historical_replay"
+    # Per-method (ml_lightgbm/croston/conservative) totals across ALL
+    # replayed windows — informational only, never folded into the
+    # LightGBM-artifact-scoped status/evaluation_count/metrics above.
+    method_breakdown: dict = Field(default_factory=dict)
+    live_monitoring: LiveMonitoringSummary
+    message: Optional[str] = None
+
+
 class ModelRetrainingStatusResponse(BaseModel):
     recommended: bool
     reason: str
@@ -745,6 +806,92 @@ async def evaluate_model_monitoring(
         logger.exception("Model monitoring evaluation failed")
         raise HTTPException(status_code=503, detail="Model monitoring persistence is unavailable.") from exc
     return _monitoring_response(result.snapshot, created=result.created)
+
+
+_HISTORICAL_REPLAY_PATH = Path(__file__).resolve().parent / "data" / "historical_monitoring_replay.json"
+
+
+@app.get(
+    "/api/model-monitoring/replay",
+    dependencies=[Depends(verify_api_key)],
+    response_model=HistoricalReplayResponse,
+)
+async def model_monitoring_replay(
+    monitoring_service: ModelMonitoringService = Depends(get_model_monitoring_service),
+):
+    """Read-only historical monitoring replay evidence.
+
+    This endpoint only reads a pre-generated JSON file produced offline by
+    ``scripts/run_historical_monitoring_replay.py`` — it never triggers replay
+    generation itself, since that recomputes forecasts for dozens of SKUs
+    across multiple historical windows and should not run on every request.
+
+    Always includes ``live_monitoring`` so a caller can implement the
+    live-takes-precedence-over-replay rule without a second request. This
+    response is never a substitute for real live evidence and must never be
+    presented as one.
+    """
+    live_evaluation_count = 0
+    live_available = False
+    try:
+        live_snapshot = monitoring_service.current_snapshot()
+        if live_snapshot is not None:
+            live_evaluation_count = int(live_snapshot.evaluation_count or 0)
+            live_available = live_snapshot.status in {"stable", "warning", "degraded"}
+    except SQLAlchemyError:
+        logger.exception("Live monitoring lookup failed while serving historical replay")
+
+    live_summary = LiveMonitoringSummary(available=live_available, evaluation_count=live_evaluation_count)
+
+    if not _HISTORICAL_REPLAY_PATH.exists():
+        return HistoricalReplayResponse(
+            available=False,
+            live_monitoring=live_summary,
+            message=(
+                "No historical replay has been generated yet. Run "
+                "`python scripts/run_historical_monitoring_replay.py` from backend/."
+            ),
+        )
+
+    try:
+        with _HISTORICAL_REPLAY_PATH.open() as fh:
+            payload = json.load(fh)
+    except Exception as exc:  # noqa: BLE001 - surface as unavailable, not a 500
+        logger.warning("Historical replay artifact unreadable: %s", exc)
+        return HistoricalReplayResponse(
+            available=False,
+            live_monitoring=live_summary,
+            message="Historical replay artifact could not be read.",
+        )
+
+    period = payload.get("historical_period") or {}
+    return HistoricalReplayResponse(
+        available=True,
+        model_name=payload.get("model_name"),
+        model_artifact_id=payload.get("model_artifact_id"),
+        model_version=payload.get("model_version"),
+        status=payload.get("status"),
+        degradation_reason=payload.get("degradation_reason"),
+        degradation_message=payload.get("degradation_message"),
+        metrics=HistoricalReplayMetrics(
+            wape=payload.get("metric_wape"),
+            mae=payload.get("metric_mae"),
+            rmse=payload.get("metric_rmse"),
+            bias=payload.get("metric_bias"),
+            mase=payload.get("metric_mase"),
+        ),
+        baseline_wape=payload.get("baseline_wape"),
+        baseline_provenance=payload.get("baseline_provenance"),
+        evaluation_count=int(payload.get("evaluation_count") or 0),
+        forecast_days=payload.get("horizon_days"),
+        horizon_days=payload.get("horizon_days"),
+        sku_count=payload.get("sku_count"),
+        historical_period=HistoricalReplayPeriod(start=period.get("start"), end=period.get("end")),
+        generated_at=payload.get("generated_at"),
+        provenance=payload.get("provenance", "historical_replay"),
+        method_breakdown=payload.get("method_breakdown") or {},
+        live_monitoring=live_summary,
+    )
 
 
 @app.get(

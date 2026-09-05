@@ -1,16 +1,19 @@
 "use client";
 
 import React from "react";
-import { Activity, AlertCircle } from "lucide-react";
-import type { ModelMonitoringSnapshot } from "@/lib/api";
+import { Activity, AlertCircle, History } from "lucide-react";
+import type { HistoricalReplayResponse, ModelMonitoringSnapshot } from "@/lib/api";
 import {
   MODEL_MONITORING_STATUS_STYLES,
   formatBaselineProvenance,
   formatMonitoringMetric,
   formatMonitoringStatus,
   formatMonitoringTime,
+  formatReplayPeriod,
   formatSignedPercent,
+  historicalReplayExplanation,
   monitoringExplanation,
+  selectModelHealthEvidence,
   usesOfflineBacktestBaseline,
 } from "@/lib/modelMonitoring";
 import { formatNumber } from "@/lib/utils";
@@ -41,15 +44,113 @@ function DetailRow({ label, value }: { label: string; value: React.ReactNode }) 
   );
 }
 
+function HistoricalReplayCard({ replay }: { replay: HistoricalReplayResponse }) {
+  const status = replay.status ?? "insufficient_evidence";
+  const styles = MODEL_MONITORING_STATUS_STYLES[status];
+  const explanation = historicalReplayExplanation(replay);
+
+  return (
+    <section className={`bg-gray-900 border ${styles.border} rounded-xl p-5`}>
+      <div className="flex items-start justify-between gap-4 mb-4">
+        <div>
+          <p className="text-[10px] font-semibold text-gray-500 uppercase tracking-[0.12em] mb-1.5">
+            Performance Monitoring
+          </p>
+          <h2 className="font-semibold text-white text-base">Model Health</h2>
+          <p className="text-xs text-gray-500 mt-1 max-w-2xl leading-relaxed">
+            Based on historical holdout replay. This is not live production monitoring.
+          </p>
+        </div>
+        <div className="flex flex-col items-end gap-1.5">
+          <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold bg-purple-500/10 text-purple-300 border-purple-500/30">
+            <History className="w-3 h-3" aria-hidden="true" />
+            HISTORICAL REPLAY
+          </span>
+          <span
+            className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full border text-xs font-semibold ${styles.badge}`}
+          >
+            <span className={`w-1.5 h-1.5 rounded-full ${styles.dot}`} aria-hidden="true" />
+            {formatMonitoringStatus(status)}
+          </span>
+        </div>
+      </div>
+
+      <div className="space-y-4">
+        <div className="flex items-start gap-2 text-xs text-gray-300 leading-relaxed">
+          <History className="w-4 h-4 mt-0.5 text-purple-300 shrink-0" aria-hidden="true" />
+          <p>{explanation}</p>
+        </div>
+
+        <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-4">
+          <Metric
+            label="Replay WAPE"
+            value={formatMonitoringMetric(replay.metrics.wape)}
+            title="LightGBM-artifact-scoped WAPE for the most recent replay window."
+          />
+          <Metric label="Baseline WAPE" value={formatMonitoringMetric(replay.baseline_wape)} />
+          <Metric
+            label="Evaluations (Latest Window)"
+            value={formatNumber(replay.evaluation_count, { maximumFractionDigits: 0 })}
+            title="LightGBM-artifact-scoped evaluations in the most recent replay window only — this is the count the status above is based on."
+          />
+          <Metric
+            label="SKUs (All Windows)"
+            value={formatNumber(replay.sku_count, { maximumFractionDigits: 0 })}
+            title="Unique SKUs covered across every replayed window and every routing method (LightGBM, Croston, conservative) — broader than, and not directly comparable to, the Evaluations count above."
+          />
+          <Metric label="Horizon (days)" value={formatNumber(replay.horizon_days, { maximumFractionDigits: 0 })} />
+          <Metric label="Historical Period" value={formatReplayPeriod(replay.historical_period)} />
+        </div>
+
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-8 gap-y-2 border-t border-gray-800 pt-3">
+          <DetailRow label="Model" value={replay.model_name || "—"} />
+          <DetailRow label="Version" value={replay.model_version || "—"} />
+          <DetailRow label="Baseline" value={formatBaselineProvenance(replay.baseline_provenance)} />
+          <DetailRow label="Reason" value={replay.degradation_reason?.replace(/_/g, " ") || "-"} />
+          <DetailRow
+            label="Live Production Evidence"
+            value={`${formatNumber(replay.live_monitoring?.evaluation_count ?? 0, {
+              maximumFractionDigits: 0,
+            })} completed evaluations / ${replay.live_monitoring?.available ? "available" : "unavailable"}`}
+          />
+          {typeof replay.metrics.mae === "number" && (
+            <DetailRow label="MAE" value={formatMonitoringMetric(replay.metrics.mae)} />
+          )}
+          {typeof replay.metrics.rmse === "number" && (
+            <DetailRow label="RMSE" value={formatMonitoringMetric(replay.metrics.rmse)} />
+          )}
+          {typeof replay.metrics.mase === "number" && (
+            <DetailRow label="MASE" value={formatMonitoringMetric(replay.metrics.mase)} />
+          )}
+          <DetailRow label="Generated" value={formatMonitoringTime(replay.generated_at)} />
+        </div>
+
+        <p className="rounded-lg border border-purple-500/20 bg-purple-500/10 px-3 py-2 text-xs text-purple-200 leading-relaxed">
+          Historical replay demonstrates model monitoring using held-out historical demand.
+          Live production actual-demand ingestion is not connected yet.
+        </p>
+      </div>
+    </section>
+  );
+}
+
 export function ModelHealthCard({
   snapshot,
   loading,
   error,
+  replay = null,
 }: {
   snapshot: ModelMonitoringSnapshot | null;
   loading: boolean;
   error: boolean;
+  replay?: HistoricalReplayResponse | null;
 }) {
+  const evidence = selectModelHealthEvidence({ liveSnapshot: snapshot, liveError: error, replay });
+
+  if (!loading && evidence.mode === "historical_replay") {
+    return <HistoricalReplayCard replay={evidence.replay} />;
+  }
+
   const status = snapshot?.status ?? "unavailable";
   const styles = MODEL_MONITORING_STATUS_STYLES[status];
   const explanation = error

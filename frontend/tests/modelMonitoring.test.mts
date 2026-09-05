@@ -2,15 +2,19 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import test from "node:test";
 
-import type { ModelMonitoringSnapshot, ModelMonitoringStatus } from "../lib/api.ts";
+import type { HistoricalReplayResponse, ModelMonitoringSnapshot, ModelMonitoringStatus } from "../lib/api.ts";
 import {
   MODEL_MONITORING_ENDPOINT,
+  MODEL_MONITORING_REPLAY_ENDPOINT,
   MODEL_MONITORING_STATUS_EXPLANATIONS,
   formatBaselineProvenance,
   formatMonitoringMetric,
   formatMonitoringStatus,
+  formatReplayPeriod,
   formatSignedPercent,
+  historicalReplayExplanation,
   monitoringExplanation,
+  selectModelHealthEvidence,
   usesOfflineBacktestBaseline,
 } from "../lib/modelMonitoring.ts";
 
@@ -119,4 +123,87 @@ test("monitoring UI does not advertise unimplemented MLOps actions or drift", ()
   const source = readFileSync(new URL("../components/ModelHealthCard.tsx", import.meta.url), "utf8");
   assert.doesNotMatch(source, /Retrain Model|Promote Model|Switch Model|Fix Drift/);
   assert.doesNotMatch(source, /Data Drift|Feature Drift|Concept Drift/);
+});
+
+// -- Historical replay precedence -------------------------------------------
+
+function replay(overrides: Partial<HistoricalReplayResponse> = {}): HistoricalReplayResponse {
+  return {
+    mode: "historical_replay",
+    available: true,
+    status: "warning",
+    metrics: { wape: 1.25 },
+    baseline_wape: 1.07,
+    evaluation_count: 39,
+    sku_count: 59,
+    horizon_days: 7,
+    historical_period: { start: "2011-12-03", end: "2011-12-09" },
+    provenance: "historical_replay",
+    method_breakdown: {},
+    live_monitoring: { available: false, evaluation_count: 0 },
+    ...overrides,
+  };
+}
+
+test("replay endpoint constant matches the documented read-only route", () => {
+  assert.equal(MODEL_MONITORING_REPLAY_ENDPOINT, "/api/model-monitoring/replay");
+});
+
+test("live evidence takes precedence over historical replay when live has a classified state", () => {
+  const live = snapshot({ status: "stable" });
+  const evidence = selectModelHealthEvidence({ liveSnapshot: live, liveError: false, replay: replay() });
+  assert.equal(evidence.mode, "live");
+});
+
+test("historical replay is shown when live monitoring is unavailable or insufficient", () => {
+  for (const liveStatus of ["unavailable", "insufficient_evidence"] as ModelMonitoringStatus[]) {
+    const live = liveStatus === "unavailable" ? null : snapshot({ status: liveStatus });
+    const evidence = selectModelHealthEvidence({ liveSnapshot: live, liveError: false, replay: replay() });
+    assert.equal(evidence.mode, "historical_replay");
+  }
+});
+
+test("unavailable remains when neither live nor replay evidence exists", () => {
+  const evidence = selectModelHealthEvidence({ liveSnapshot: null, liveError: false, replay: replay({ available: false }) });
+  assert.equal(evidence.mode, "unavailable");
+});
+
+test("a live API error falls back to replay rather than showing stale live data", () => {
+  const evidence = selectModelHealthEvidence({
+    liveSnapshot: snapshot({ status: "stable" }),
+    liveError: true,
+    replay: replay(),
+  });
+  assert.equal(evidence.mode, "historical_replay");
+});
+
+test("live and replay evaluation counts are never combined", () => {
+  const live = snapshot({ status: "insufficient_evidence", evaluation_count: 5 });
+  const r = replay({ evaluation_count: 39 });
+  const evidence = selectModelHealthEvidence({ liveSnapshot: live, liveError: false, replay: r });
+  assert.equal(evidence.mode, "historical_replay");
+  if (evidence.mode === "historical_replay") {
+    assert.equal(evidence.replay.evaluation_count, 39);
+    assert.notEqual(evidence.replay.evaluation_count, 5 + 39);
+  }
+});
+
+test("historical replay explanation never claims live production truth", () => {
+  const text = historicalReplayExplanation(replay());
+  assert.doesNotMatch(text, /live production|real-time|ERP|POS/i);
+});
+
+test("formats the historical period as a readable range", () => {
+  assert.equal(formatReplayPeriod({ start: "2011-12-03", end: "2011-12-09" }), "2011-12-03 → 2011-12-09");
+  assert.equal(formatReplayPeriod(null), "—");
+});
+
+test("model health card visibly labels historical replay and never overclaims", () => {
+  const source = readFileSync(new URL("../components/ModelHealthCard.tsx", import.meta.url), "utf8");
+  assert.match(source, /HISTORICAL REPLAY/);
+  assert.match(source, /This is not live production monitoring\./);
+  assert.match(source, /Live production actual-demand ingestion is not connected yet\./);
+  assert.match(source, /Live Production Evidence/);
+  assert.match(source, /completed evaluations/);
+  assert.doesNotMatch(source, /live ERP evidence|real-time drift/i);
 });

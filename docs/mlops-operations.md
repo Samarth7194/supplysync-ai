@@ -96,6 +96,32 @@ Manual/controlled steps:
 
 `AUTO_RETRAIN_ENABLED=false` remains the intended production posture. The system may recommend retraining, but it does not execute retraining automatically.
 
+## Historical Monitoring Replay (Not Live Monitoring)
+
+The processed dataset is historical (2009-12-01 through 2011-12-09) with no
+connected ERP/POS actual-demand stream, so predictions logged today target
+windows that will never resolve into real `forecast_evaluations`. Live
+monitoring honestly reports `insufficient_evidence`/`unavailable` in that
+situation — it is not broken, it is correctly refusing to fabricate evidence.
+
+`scripts/run_historical_monitoring_replay.py` demonstrates the same
+evaluate → monitor lifecycle against held-out historical windows instead,
+reusing the real hybrid forecasting/routing and monitoring-classification
+code. It never writes to any live table (`prediction_logs`,
+`forecast_evaluations`, `model_monitoring_snapshots`, `retraining_runs`),
+never opens a database session, and its output is always tagged
+`provenance: historical_replay`. `GET /api/model-monitoring/replay` serves
+the pre-generated result read-only and is never used as a substitute for
+live evidence in `RetrainingDecisionService`. See
+`docs/mlops-monitoring.md` for the full design and the three-way distinction
+between offline backtest, historical replay, and live monitoring.
+
+Run from `backend/`:
+
+```powershell
+python scripts/run_historical_monitoring_replay.py
+```
+
 ## Known Limitations
 
 - Recursive LightGBM future calendar-feature advancement limitation remains.

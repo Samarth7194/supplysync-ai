@@ -25,6 +25,7 @@ import {
   type RecentAnalysis,
   type StockLevel,
   type ModelMonitoringSnapshot,
+  type HistoricalReplayResponse,
 } from "@/lib/api";
 import {
   DataSourceBadge,
@@ -169,6 +170,7 @@ export default function Dashboard() {
   const [modelMonitoring, setModelMonitoring] = useState<ModelMonitoringSnapshot | null>(null);
   const [modelMonitoringLoading, setModelMonitoringLoading] = useState(true);
   const [modelMonitoringError, setModelMonitoringError] = useState(false);
+  const [modelMonitoringReplay, setModelMonitoringReplay] = useState<HistoricalReplayResponse | null>(null);
   const [activeFilter, setActiveFilter] = useState("ALL");
   const [searchQuery, setSearchQuery] = useState("");
 
@@ -199,6 +201,17 @@ export default function Dashboard() {
           })
           .finally(() => {
             if (!cancelled) setModelMonitoringLoading(false);
+          });
+
+        // Historical replay is independent of live monitoring: it's a small,
+        // pre-generated read-only artifact, never live production evidence.
+        api
+          .getModelMonitoringReplay()
+          .then((replay) => {
+            if (!cancelled) setModelMonitoringReplay(replay);
+          })
+          .catch(() => {
+            if (!cancelled) setModelMonitoringReplay(null);
           });
 
         const [healthRes, kpiRes, skuRes, stockRes] = await Promise.all([
@@ -483,6 +496,7 @@ export default function Dashboard() {
           snapshot={modelMonitoring}
           loading={modelMonitoringLoading}
           error={modelMonitoringError}
+          replay={modelMonitoringReplay}
         />
 
         {/* SKU Portfolio */}
