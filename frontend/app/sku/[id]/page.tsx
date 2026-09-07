@@ -308,30 +308,40 @@ export default function SKUDetail() {
     <div className="min-h-screen bg-gray-950 text-white">
       {/* Header */}
       <header className="sticky top-0 z-50 border-b border-gray-800 bg-gray-950/80 backdrop-blur-md">
-        <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between">
-          <div className="flex items-center gap-4">
+        <div className="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between gap-4">
+          <div className="flex items-center gap-4 min-w-0">
             <Link
               href="/"
-              className="flex items-center gap-1.5 text-gray-400 hover:text-white transition-colors text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded"
+              className="flex items-center gap-1.5 text-gray-400 hover:text-white transition-colors text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 rounded shrink-0"
             >
               <ArrowLeft className="w-4 h-4" />
               Dashboard
             </Link>
-            <div className="h-5 w-px bg-gray-800" />
-            <div>
-              <h1 className="font-bold text-sm">{name}</h1>
+            <div className="h-5 w-px bg-gray-800 shrink-0" />
+            <div className="min-w-0">
+              <h1 className="font-bold text-sm truncate" title={name}>{name}</h1>
               <span className="text-xs text-gray-500 font-mono">{skuId}</span>
             </div>
           </div>
-          {analysis && <RiskBadge risk={analysis.risk} />}
+          {analysis && (
+            <div className="shrink-0">
+              <RiskBadge risk={analysis.risk} />
+            </div>
+          )}
         </div>
       </header>
 
       <main className="max-w-6xl mx-auto px-6 py-8 space-y-6">
         {error && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded-xl px-6 py-4 text-sm text-red-400 flex items-center justify-between">
+          <div role="alert" className="bg-red-500/10 border border-red-500/30 rounded-xl px-6 py-4 text-sm text-red-400 flex items-center justify-between">
             <span>{error}</span>
-            <button onClick={() => setError(null)} className="text-red-400 hover:text-red-300 ml-4 font-bold">&times;</button>
+            <button
+              onClick={() => setError(null)}
+              aria-label="Dismiss error"
+              className="text-red-400 hover:text-red-300 ml-4 font-bold focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-red-400 rounded"
+            >
+              &times;
+            </button>
           </div>
         )}
         {analysis?.demand_source === "synthetic" && (
@@ -588,48 +598,6 @@ export default function SKUDetail() {
           </div>
         )}
 
-        {/* Why this forecast path — deterministic, template-generated
-            explanations tied to the real routing and stock inputs. */}
-        {analysis?.explanation && (
-          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
-            <SectionHeader
-              compact
-              eyebrow="Reasoning"
-              title="Why this forecast path"
-              subtitle="Deterministic explanations composed from the real inputs — no LLM, no fabricated confidence score."
-            />
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-xs">
-              <div>
-                <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-1">
-                  Classification
-                </p>
-                <p className="text-gray-300 leading-relaxed">
-                  {analysis.explanation.classification_reason}
-                </p>
-              </div>
-              <div>
-                <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-1">
-                  Method choice
-                </p>
-                <p className="text-gray-300 leading-relaxed">
-                  {analysis.explanation.method_reason}
-                </p>
-              </div>
-              <div>
-                <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-1">
-                  Risk reasoning
-                </p>
-                <p className="text-gray-300 leading-relaxed">
-                  {analysis.explanation.risk_reason}
-                </p>
-              </div>
-            </div>
-            <p className="text-[11px] text-gray-500 border-t border-gray-800 pt-3 mt-5 leading-relaxed">
-              {analysis.explanation.confidence_note}
-            </p>
-          </div>
-        )}
-
         <div className="grid grid-cols-1 lg:grid-cols-5 gap-6">
           {/* Left: Recorded sales history (3 cols) — the core "actual past
               data" surface. Deliberately titled and labeled so nothing here
@@ -676,7 +644,7 @@ export default function SKUDetail() {
             {analysis && historyAvailable ? (
               <>
                 <ResponsiveContainer width="100%" height={280}>
-                  <BarChart data={history} margin={{ top: 10, right: 10, bottom: 0, left: 0 }}>
+                  <BarChart data={history} margin={{ top: 10, right: 44, bottom: 0, left: 0 }}>
                     <XAxis
                       dataKey="date"
                       tick={{ fill: "#6b7280", fontSize: 11 }}
@@ -701,7 +669,7 @@ export default function SKUDetail() {
                       stroke="#22c55e"
                       strokeDasharray="6 3"
                       label={{
-                        value: `Historical avg: ${formatNumber(analysis.forecast.p50, { maximumFractionDigits: 1 })}`,
+                        value: formatNumber(analysis.forecast.p50, { maximumFractionDigits: 1 }),
                         position: "right",
                         fill: "#22c55e",
                         fontSize: 11,
@@ -712,7 +680,7 @@ export default function SKUDetail() {
                       stroke="#ef4444"
                       strokeDasharray="6 3"
                       label={{
-                        value: `Historical P90: ${formatNumber(analysis.forecast.p90, { maximumFractionDigits: 1 })}`,
+                        value: formatNumber(analysis.forecast.p90, { maximumFractionDigits: 1 }),
                         position: "right",
                         fill: "#ef4444",
                         fontSize: 11,
@@ -722,7 +690,7 @@ export default function SKUDetail() {
                       y={stock}
                       stroke="#eab308"
                       label={{
-                        value: `Stock: ${formatNumber(stock)}`,
+                        value: formatNumber(stock),
                         position: "right",
                         fill: "#eab308",
                         fontSize: 11,
@@ -1025,6 +993,51 @@ export default function SKUDetail() {
             )}
           </div>
         </div>
+
+        {/* Why this forecast path — deterministic, template-generated
+            explanations tied to the real routing and stock inputs. Placed
+            after the situation/forecast/decision detail above so the page
+            reads situation -> forecast -> decision -> why, instead of
+            explaining the reasoning before showing what it explains. */}
+        {analysis?.explanation && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-5">
+            <SectionHeader
+              compact
+              eyebrow="Reasoning"
+              title="Why this forecast path"
+              subtitle="Deterministic explanations composed from the real inputs — no LLM, no fabricated confidence score."
+            />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5 text-xs">
+              <div>
+                <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-1">
+                  Classification
+                </p>
+                <p className="text-gray-300 leading-relaxed">
+                  {analysis.explanation.classification_reason}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-1">
+                  Method choice
+                </p>
+                <p className="text-gray-300 leading-relaxed">
+                  {analysis.explanation.method_reason}
+                </p>
+              </div>
+              <div>
+                <p className="text-[11px] text-gray-500 uppercase tracking-wider mb-1">
+                  Risk reasoning
+                </p>
+                <p className="text-gray-300 leading-relaxed">
+                  {analysis.explanation.risk_reason}
+                </p>
+              </div>
+            </div>
+            <p className="text-[11px] text-gray-500 border-t border-gray-800 pt-3 mt-5 leading-relaxed">
+              {analysis.explanation.confidence_note}
+            </p>
+          </div>
+        )}
 
         {/* How This Decision Was Made */}
         {analysis && (

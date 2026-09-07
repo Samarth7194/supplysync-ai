@@ -45,7 +45,7 @@ export function formatUnits(
 export function formatForecastMethod(method: string | null | undefined): string {
   const labels: Record<string, string> = {
     ml_lightgbm: "LightGBM",
-    croston: "Croston",
+    croston: "Croston-SBA",
     conservative: "Conservative",
     simple_average: "Simple Average",
   };

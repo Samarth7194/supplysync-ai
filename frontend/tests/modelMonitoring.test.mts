@@ -117,8 +117,20 @@ test("model health card exposes the primary monitoring metrics", () => {
 
 test("model health card uses responsive grid classes", () => {
   const source = readFileSync(new URL("../components/ModelHealthCard.tsx", import.meta.url), "utf8");
-  assert.match(source, /grid-cols-2 sm:grid-cols-3 lg:grid-cols-6/);
+  assert.match(source, /grid-cols-2 sm:grid-cols-3 lg:grid-cols-5/);
   assert.match(source, /grid-cols-1 md:grid-cols-2/);
+});
+
+test("model health metric tiles stay short — long date/time fields live in the wider detail rows instead", () => {
+  // A regression guard for a real density bug: cramming a date-range or a
+  // formatted timestamp into an equal-width metric tile either truncates it
+  // or breaks the grid. Both "Historical Period" (replay) and "Last Run"
+  // (live) must render as DetailRow entries, not Metric tiles.
+  const source = readFileSync(new URL("../components/ModelHealthCard.tsx", import.meta.url), "utf8");
+  assert.match(source, /<DetailRow label="Historical Period"/);
+  assert.match(source, /<DetailRow label="Last Run"/);
+  assert.doesNotMatch(source, /<Metric\s+label="Historical Period"/);
+  assert.doesNotMatch(source, /<Metric label="Last Run"/);
 });
 
 test("monitoring UI does not advertise unimplemented MLOps actions or drift", () => {

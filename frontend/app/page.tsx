@@ -147,7 +147,9 @@ function KpiCard({
           </span>
         )}
       </div>
-      <p className="text-[28px] leading-none font-bold text-white tracking-tight">{value}</p>
+      <p className="text-2xl sm:text-[28px] leading-none font-bold text-white tracking-tight truncate" title={value}>
+        {value}
+      </p>
       <p className="text-xs text-gray-500 leading-snug">{sublabel}</p>
     </div>
   );
@@ -312,6 +314,24 @@ export default function Dashboard() {
     LOW: "border-l-green-500/70",
   };
 
+  // Shared per-row view model for both the desktop table and the mobile
+  // card list below, so stock/origin/border derivation is computed once
+  // instead of twice.
+  // stockVersion is read to force recomputation after fallback (browser-
+  // stored) stock edits, which don't otherwise change any state this
+  // depends on.
+  void stockVersion;
+  const skuRows = filteredSkus.map((sku) => {
+    const a = analyses[sku.id];
+    const demo = computeDemoStock(sku.avg_demand, skuDetails.indexOf(sku));
+    const server = serverStock[sku.id];
+    const stock = server?.quantity_on_hand ?? getStockForSku(sku.id, demo);
+    const origin = server ? "server" : getStockOrigin(sku.id);
+    const isEditing = editingStock?.sku === sku.id;
+    const borderClass = a ? riskBorder[a.risk] || "border-l-gray-700" : "border-l-gray-800";
+    return { sku, a, stock, origin, isEditing, borderClass };
+  });
+
   async function commitStockEdit(sku: string, raw: string) {
     const parsed = Number(raw);
     if (!Number.isFinite(parsed) || parsed < 0) {
@@ -442,7 +462,6 @@ export default function Dashboard() {
               "Results from the project backtest. Hover over each metric for its definition."
             }
           />
-          {kpisUnavailable && !kpis && null}
         </section>
         {kpisUnavailable && !kpis && (
           <EmptyState
@@ -547,8 +566,9 @@ export default function Dashboard() {
           </div>
         </div>
 
-        {/* SKU Table */}
-        <div className="bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
+        {/* SKU Table — desktop/tablet only; mobile gets a stacked card list
+            below instead of a horizontally-scrolling 7-column table. */}
+        <div className="hidden md:block bg-gray-900 border border-gray-800 rounded-xl overflow-hidden">
           <div className="overflow-x-auto">
             <table className="w-full">
               <thead>
@@ -575,21 +595,17 @@ export default function Dashboard() {
               <tbody>
                 {loading
                   ? Array.from({ length: 8 }).map((_, i) => <SkeletonRow key={i} index={i} />)
-                  : filteredSkus.map((sku) => {
-                      const a = analyses[sku.id];
-                      const demo = computeDemoStock(sku.avg_demand, skuDetails.indexOf(sku));
-                      // stockVersion is read to force re-render after fallback edits.
-                      void stockVersion;
-                      const server = serverStock[sku.id];
-                      const stock = server?.quantity_on_hand ?? getStockForSku(sku.id, demo);
-                      const origin = server ? "server" : getStockOrigin(sku.id);
-                      const isEditing = editingStock?.sku === sku.id;
-                      const borderClass = a ? riskBorder[a.risk] || "border-l-gray-700" : "border-l-gray-800";
-                      return (
+                  : skuRows.map(({ sku, a, stock, origin, isEditing, borderClass }) => (
                         <tr
                           key={sku.id}
                           onClick={() => router.push(`/sku/${sku.id}`)}
-                          className={`group border-b border-gray-800/50 border-l-2 ${borderClass} hover:bg-gray-800/30 cursor-pointer transition-colors`}>
+                          role="button"
+                          tabIndex={0}
+                          aria-label={`Open analysis for ${sku.id} — ${sku.name}`}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") router.push(`/sku/${sku.id}`);
+                          }}
+                          className={`group border-b border-gray-800/50 border-l-2 ${borderClass} hover:bg-gray-800/30 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500`}>
                             <td className="px-4 py-3.5">
                               <span className="font-mono text-sm font-semibold text-blue-400">{sku.id}</span>
                             </td>
@@ -682,41 +698,140 @@ export default function Dashboard() {
                               </span>
                             </td>
                           </tr>
-                      );
-                    })}
+                    ))}
               </tbody>
             </table>
           </div>
-          {!loading && filteredSkus.length === 0 && (
-            <div className="p-6">
-              {skusUnavailable ? (
-                <EmptyState
-                  title="SKU list unavailable"
-                  hint={
-                    <>
-                      The backend didn&apos;t return the SKU list. If you&apos;re running
-                      locally, check that the API is up and that the processed dataset
-                      exists — <code className="px-1 py-0.5 rounded bg-gray-800 text-gray-300 text-[11px]">
-                        python scripts/bootstrap.py
-                      </code>{" "}in the backend generates it.
-                    </>
-                  }
-                  tone="warning"
-                />
-              ) : (
-                <EmptyState title="No SKUs match your filter" hint="Clear the search or change the filter above." />
-              )}
-            </div>
-          )}
-          {!loading && filteredSkus.length > 0 && (
-            <div className="px-4 py-3 border-t border-gray-800/50 text-[11px] text-gray-500 leading-relaxed">
-              Stock values use <span className="text-amber-300 font-medium">demo defaults</span> until updated. Saved
-              values are stored on the server, with a browser fallback if the stock API is unavailable. Method badges identify how each recommendation was produced —{" "}
-              <span className="text-cyan-300">model</span>, <span className="text-violet-300">statistical</span>, or{" "}
-              <span className="text-amber-300">rule-based fallback</span>.
-            </div>
-          )}
+        </div>
+
+        {/* Mobile SKU cards — same data/interactions as the table above,
+            laid out as a stacked list instead of a horizontally-scrolling
+            7-column table, which is unusable on a phone. */}
+        <div className="md:hidden space-y-3">
+          {loading
+            ? Array.from({ length: 5 }).map((_, i) => (
+                <div key={i} className="bg-gray-900 border border-gray-800 rounded-xl p-4 space-y-3">
+                  <div className="h-4 w-24 bg-gray-800 rounded animate-pulse" />
+                  <div className="h-3 w-3/4 bg-gray-800 rounded animate-pulse" />
+                  <div className="h-3 w-1/2 bg-gray-800 rounded animate-pulse" />
+                </div>
+              ))
+            : skuRows.map(({ sku, a, stock, origin, isEditing, borderClass }) => (
+                <div
+                  key={sku.id}
+                  role="button"
+                  tabIndex={0}
+                  aria-label={`Open analysis for ${sku.id} — ${sku.name}`}
+                  onClick={() => router.push(`/sku/${sku.id}`)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter") router.push(`/sku/${sku.id}`);
+                  }}
+                  className={`bg-gray-900 border border-gray-800 border-l-2 ${borderClass} rounded-xl p-4 cursor-pointer active:bg-gray-800/40 transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500`}
+                >
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-mono text-sm font-semibold text-blue-400 truncate">{sku.id}</p>
+                      <p className="text-sm text-gray-300 truncate mt-0.5">{sku.name}</p>
+                    </div>
+                    {a ? <RiskBadge risk={a.risk} /> : <span className="text-xs text-gray-600 shrink-0">…</span>}
+                  </div>
+
+                  <div className="flex items-center gap-x-3 gap-y-1.5 flex-wrap mt-3">
+                    {a && <PatternBadge pattern={a.demand_pattern} />}
+                    {a && (
+                      <span className="inline-flex items-center gap-1.5">
+                        <span className="text-xs text-gray-400">{formatForecastMethod(a.forecast_method)}</span>
+                        <DataSourceBadge kind={forecastSourceKind(a.forecast_source)} />
+                      </span>
+                    )}
+                  </div>
+
+                  <div className="flex items-end justify-between gap-3 mt-3 pt-3 border-t border-gray-800/60">
+                    <div
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        if (!isEditing) setEditingStock({ sku: sku.id, draft: String(stock) });
+                      }}
+                    >
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider">Stock</p>
+                      {isEditing ? (
+                        <input
+                          type="number"
+                          min={0}
+                          step={1}
+                          autoFocus
+                          value={editingStock?.draft ?? ""}
+                          aria-label={`Current stock for ${sku.id}`}
+                          onClick={(e) => e.stopPropagation()}
+                          onChange={(e) => setEditingStock({ sku: sku.id, draft: e.target.value })}
+                          onBlur={() => commitStockEdit(sku.id, editingStock?.draft ?? String(stock))}
+                          onKeyDown={(e) => {
+                            e.stopPropagation();
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              (e.target as HTMLInputElement).blur();
+                            } else if (e.key === "Escape") {
+                              e.preventDefault();
+                              setEditingStock(null);
+                            }
+                          }}
+                          className="mt-1 w-24 bg-gray-950 border border-blue-500/60 rounded px-2 py-1.5 text-sm font-mono tabular-nums text-white focus:outline-none"
+                        />
+                      ) : (
+                        <span className="mt-1 inline-flex items-center gap-1.5 text-sm font-medium text-gray-200 tabular-nums">
+                          {formatNumber(stock)}
+                          {origin !== "demo" && <span className="w-1 h-1 rounded-full bg-emerald-400" aria-hidden="true" />}
+                          <Pencil className="w-3 h-3 text-gray-600" aria-hidden="true" />
+                        </span>
+                      )}
+                    </div>
+                    <div className="text-right">
+                      <p className="text-[10px] text-gray-500 uppercase tracking-wider">Order Qty</p>
+                      <p className="mt-1">
+                        {a && a.recommended_order > 0 ? (
+                          <span className="text-sm font-semibold text-blue-400 tabular-nums">{formatNumber(a.recommended_order)}</span>
+                        ) : a ? (
+                          <span className="text-sm text-gray-600">—</span>
+                        ) : (
+                          <span className="text-xs text-gray-600">…</span>
+                        )}
+                      </p>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-gray-700 shrink-0 mb-0.5" aria-hidden="true" />
+                  </div>
+                </div>
+              ))}
+        </div>
+
+        {!loading && filteredSkus.length === 0 && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl p-6">
+            {skusUnavailable ? (
+              <EmptyState
+                title="SKU list unavailable"
+                hint={
+                  <>
+                    The backend didn&apos;t return the SKU list. If you&apos;re running
+                    locally, check that the API is up and that the processed dataset
+                    exists — <code className="px-1 py-0.5 rounded bg-gray-800 text-gray-300 text-[11px]">
+                      python scripts/bootstrap.py
+                    </code>{" "}in the backend generates it.
+                  </>
+                }
+                tone="warning"
+              />
+            ) : (
+              <EmptyState title="No SKUs match your filter" hint="Clear the search or change the filter above." />
+            )}
           </div>
+        )}
+        {!loading && filteredSkus.length > 0 && (
+          <div className="bg-gray-900 border border-gray-800 rounded-xl px-4 py-3 text-[11px] text-gray-500 leading-relaxed">
+            Stock values use <span className="text-amber-300 font-medium">demo defaults</span> until updated. Saved
+            values are stored on the server, with a browser fallback if the stock API is unavailable. Method badges identify how each recommendation was produced —{" "}
+            <span className="text-cyan-300">model</span>, <span className="text-violet-300">statistical</span>, or{" "}
+            <span className="text-amber-300">rule-based fallback</span>.
+          </div>
+        )}
         </section>
 
         {/* Recent analyses — proof that outputs are persisted, not transient. */}
@@ -749,7 +864,13 @@ export default function Dashboard() {
                       <tr
                         key={row.id}
                         onClick={() => router.push(`/sku/${row.sku}`)}
-                        className="group border-b border-gray-800/40 hover:bg-gray-800/30 cursor-pointer transition-colors"
+                        role="button"
+                        tabIndex={0}
+                        aria-label={`Open analysis for ${row.sku}`}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") router.push(`/sku/${row.sku}`);
+                        }}
+                        className="group border-b border-gray-800/40 hover:bg-gray-800/30 cursor-pointer transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-inset focus-visible:ring-blue-500"
                       >
                         <td className="px-4 py-2.5 text-gray-400" title={new Date(row.created_at).toLocaleString()}>
                           {formatRelativeTime(row.created_at)}
