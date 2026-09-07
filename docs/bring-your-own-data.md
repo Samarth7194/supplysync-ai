@@ -2,7 +2,7 @@
 
 The headline demo runs on the UCI Online Retail II dataset, but the training, evaluation, and forecasting logic don't depend on that specific CSV. This guide shows three ways to point the pipeline at your own data.
 
-> **Honesty guard:** the "37.8% cost reduction / 95.7% fill rate" headline in the root README is specific to Online Retail II's top-20 SKUs. Your numbers will differ. For a fair read on whether this approach fits your data, run the cross-SKU evaluation (§3 below) — it's the honest generalization test.
+> **Honesty guard:** the cost-savings/fill-rate KPIs served at `GET /api/kpis` (`backend/data/cached_kpis.json`) are specific to Online Retail II's top-10 SKUs. Your numbers will differ. For a fair read on whether this approach fits your data, run the cross-SKU evaluation (§3 below) — it's the honest generalization test.
 
 ---
 

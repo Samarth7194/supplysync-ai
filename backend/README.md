@@ -34,7 +34,7 @@ backend/
 │   └── evaluate_custom_dataset.py  # NEW — zero-shot evaluation on any compatible CSV
 ├── saved_models/               # lightgbm_demand_forecast.pkl + _metadata.json
 ├── data/                       # cached_kpis.json, forecast_evaluation.{json,csv}, historical_monitoring_replay.json (local dev DB: data/supplysync.db)
-└── tests/                      # 100+ pytest cases
+└── tests/                      # 280+ pytest cases
 ```
 
 ---

@@ -1,6 +1,6 @@
 # Screenshot capture guide
 
-This folder holds real screenshots of the running app. The root `README.md` references five screenshots — follow this guide to produce all of them in ~10 minutes.
+This folder holds real screenshots of the running app. None are committed yet — the root `README.md` deliberately doesn't reference any screenshot files until they actually exist, to avoid broken image links. Follow this guide to produce the 7 numbered screenshots below (roughly 15 minutes), then add matching `![...]` image tags to the root README's Screenshots section once the files are in place.
 
 **Ground rules:**
 - Real captures only (from a local `make backend` + `make frontend` session). No wireframes, no design mocks, no hand-edited numbers.
@@ -57,13 +57,26 @@ Save each file under `docs/screenshots/` with the exact filename below so the ro
 - **Capture:** Viewport screenshot.
 - **What to show:** The Current stock input with the user-entered value, the stock provenance pill, and the hero recommendation reflecting the new stock.
 
+## 6. `06-model-health-replay.png` — Model Health / Historical Replay card
+
+- **URL:** `http://localhost:3000` (dashboard, scroll to the Model Health card).
+- **Pre-state:** If live monitoring has no snapshot yet (the common case for a fresh local run), the card falls back to Historical Replay automatically. To generate replay evidence first: `cd backend && python scripts/run_historical_monitoring_replay.py`, then reload the dashboard.
+- **Capture:** Viewport screenshot, cropped to the Model Health card.
+- **What to show:** The **HISTORICAL REPLAY** badge, the status pill (Stable/Warning/Degraded), the replay WAPE/baseline metrics, and the "This is not live production monitoring" disclosure — this is the single best screenshot for demonstrating the MLOps monitoring work honestly.
+
+## 7. `07-hybrid-method-performance.png` — Forecasting Method Performance breakdown
+
+- **URL:** `http://localhost:3000` (dashboard, Model Health card, when historical replay is shown).
+- **Capture:** Viewport screenshot, cropped to the "Forecasting Method Performance" section beneath the main Model Health metrics.
+- **What to show:** The per-method cards (LightGBM, Croston-SBA, Conservative) with SKU counts and WAPE — direct visual evidence that the hybrid router genuinely uses more than one method.
+
 ---
 
 ## Optional extras
 
-- `06-dashboard-mobile.png` — `375 × 812` viewport of the dashboard, showing the responsive pipeline divider and single-column KPI stack.
-- `07-recent-analyses.png` — zoomed-in crop of the Recent analyses panel with several persisted rows.
-- `08-cross-sku-cli.png` — terminal screenshot of `python scripts/evaluate_cross_sku.py --folds 5` output. Good supporting image for the bring-your-own-data section.
+- `08-dashboard-mobile.png` — `375 × 812` viewport of the dashboard, showing the responsive pipeline divider and single-column KPI stack.
+- `09-recent-analyses.png` — zoomed-in crop of the Recent analyses panel with several persisted rows.
+- `10-cross-sku-cli.png` — terminal screenshot of `python scripts/evaluate_cross_sku.py --folds 5` output. Good supporting image for the bring-your-own-data section.
 
 ---
 

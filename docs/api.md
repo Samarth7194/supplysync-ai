@@ -31,6 +31,13 @@ All examples below omit auth; add the cookie or `X-API-Key` header when `AUTH_MO
 | GET  | `/api/skus/{sku}/history?days=30` | Recorded daily demand for a SKU |
 | POST | `/api/analyze`                 | Risk + reorder recommendation for a single SKU |
 | GET  | `/api/analyses/recent?limit=N`    | Most-recent persisted analyses from SQLAlchemy `analysis_runs` |
+| GET  | `/api/model-monitoring`        | Latest live monitoring snapshot for the active model |
+| GET  | `/api/model-monitoring/history` | Recent monitoring snapshots, newest first |
+| POST | `/api/model-monitoring/evaluate` | Create/reuse one monitoring snapshot — never retrains or promotes |
+| GET  | `/api/model-monitoring/replay` | Read-only historical monitoring replay evidence — never live; see [docs/mlops-monitoring.md](./mlops-monitoring.md) |
+| GET  | `/api/model-retraining/status` | Read-only retraining recommendation status — never persists or trains |
+
+The MLOps endpoints above are documented in depth in [docs/mlops-monitoring.md](./mlops-monitoring.md) and [docs/model-promotion.md](./model-promotion.md) rather than repeated here — promotion and rollback are deliberately CLI-only and have no HTTP route.
 
 ---
 
