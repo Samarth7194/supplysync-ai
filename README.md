@@ -196,7 +196,19 @@ cd backend && python scripts/evaluate_forecast.py
 
 ## Screenshots
 
-No screenshots are committed yet — this repository does not fabricate images. Follow [`docs/screenshots/README.md`](docs/screenshots/README.md) for the exact capture list (dashboard, SKU detail, Model Health / Historical Replay card, hybrid method performance breakdown) and drop the PNGs into `docs/screenshots/` using the filenames given there; this section will link them once they exist.
+Real captures from the deployed app (Vercel frontend + Render backend), not mockups.
+
+### Dashboard
+![SupplySync dashboard overview](docs/screenshots/dashboard.png)
+
+### SKU Decision Analysis
+![SKU-level forecast and reorder recommendation](docs/screenshots/sku-analysis.png)
+
+### Model Monitoring — Historical Replay
+![Model Health card clearly labeled as historical replay, not live monitoring](docs/screenshots/model-health-historical-replay.png)
+
+### Hybrid Forecasting Method Performance
+![LightGBM, Croston-SBA, and Conservative method breakdown](docs/screenshots/hybrid-forecasting-performance.png)
 
 ---
 

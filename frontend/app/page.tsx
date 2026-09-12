@@ -540,14 +540,14 @@ export default function Dashboard() {
                 aria-selected={activeFilter === f}
                 aria-label={`Filter: ${f} risk (${filterCounts[f as keyof typeof filterCounts]})`}
                 onClick={() => setActiveFilter(f)}
-                className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
+                className={`px-2.5 sm:px-4 py-1.5 rounded-md text-sm font-medium transition-colors focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-blue-500 ${
                   activeFilter === f
                     ? "bg-gray-800 text-white"
                     : "text-gray-500 hover:text-gray-300"
                 }`}
               >
                 {f}
-                <span className="ml-1.5 text-xs text-gray-600">
+                <span className="ml-1 sm:ml-1.5 text-xs text-gray-600">
                   {filterCounts[f as keyof typeof filterCounts]}
                 </span>
               </button>

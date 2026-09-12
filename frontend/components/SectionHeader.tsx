@@ -49,7 +49,7 @@ export function SectionHeader({
           </p>
         )}
       </div>
-      {right && <div className="shrink-0">{right}</div>}
+      {right && <div className="shrink-0 max-w-full">{right}</div>}
     </div>
   );
 }
