@@ -10,6 +10,11 @@ from services.model_routing_service import RoutingDecision, ModelRoutingService
 
 logger = logging.getLogger(__name__)
 
+# Number of most-recent daily observations the live analysis path feeds to
+# classification and forecasting. The backtest and replay use the same window
+# so evaluation reflects what production actually does.
+PRODUCTION_HISTORY_DAYS = 60
+
 def classify_sku_demand_pattern(demand_series: pd.Series) -> str:
     """
     Classify SKU demand pattern based on intermittency.

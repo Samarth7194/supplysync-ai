@@ -292,31 +292,98 @@ def test_missing_baseline_is_handled_safely():
     assert snapshot.baseline_provenance == "unavailable"
 
 
+def _offline_payload(tmp_path, body: str):
+    path = tmp_path / "forecast_evaluation.json"
+    path.write_text(body)
+    return path
+
+
 def test_offline_baseline_provenance_is_labeled(tmp_path):
     session = _session()
     artifact = _artifact(session)
     _logged_eval(session, artifact=artifact, generated_at=datetime.now(timezone.utc), horizon=3)
-    path = tmp_path / "forecast_evaluation.json"
-    path.write_text(
+    path = _offline_payload(
+        tmp_path,
         """
-        {
-          "horizons": {
-            "3": {
-              "aggregates": {
-                "all": {
-                  "lightgbm": {"wape": 0.42}
-                }
-              }
-            }
-          }
-        }
-        """
+        {"horizons": {"3": {
+            "schema_version": 2, "evaluation_mode": "multi_step_rolling_origin", "horizon_days": 3,
+            "aggregates": {"regular": {"lightgbm": {"wape": 0.42}}}
+        }}}
+        """,
     )
 
     snapshot = _service(session, offline_path=path).create_snapshot().snapshot
 
     assert snapshot.baseline_wape == Decimal("0.420000")
     assert snapshot.baseline_provenance == "offline_backtest"
+
+
+def test_offline_baseline_is_scoped_to_regular_class_not_all_classes(tmp_path):
+    """LightGBM never serves intermittent SKUs, so their errors must not leak into its baseline."""
+    session = _session()
+    artifact = _artifact(session)
+    _logged_eval(session, artifact=artifact, generated_at=datetime.now(timezone.utc), horizon=7)
+    path = _offline_payload(
+        tmp_path,
+        """
+        {"horizons": {"7": {
+            "schema_version": 2, "evaluation_mode": "multi_step_rolling_origin", "horizon_days": 7,
+            "aggregates": {
+                "all": {"lightgbm": {"wape": 2.0}},
+                "regular": {"lightgbm": {"wape": 1.1}},
+                "intermittent": {"lightgbm": {"wape": 3.0}}
+            }
+        }}}
+        """,
+    )
+
+    snapshot = _service(session, offline_path=path).create_snapshot().snapshot
+
+    assert snapshot.baseline_wape == Decimal("1.100000")
+
+
+def test_offline_baseline_rejects_legacy_one_step_evidence(tmp_path):
+    """A one-step-ahead WAPE is not comparable with a multi-step forecast error."""
+    session = _session()
+    artifact = _artifact(session)
+    _logged_eval(session, artifact=artifact, generated_at=datetime.now(timezone.utc), horizon=7)
+    path = _offline_payload(
+        tmp_path,
+        """
+        {"horizons": {"7": {"horizon_days": 7,
+            "aggregates": {"all": {"lightgbm": {"wape": 1.0655}}, "regular": {"lightgbm": {"wape": 1.01}}}
+        }}}
+        """,
+    )
+
+    snapshot = _service(session, offline_path=path).create_snapshot().snapshot
+
+    assert snapshot.baseline_wape is None
+    assert snapshot.baseline_provenance == "unavailable"
+
+
+def test_offline_baseline_requires_matching_horizon(tmp_path):
+    session = _session()
+    artifact = _artifact(session)
+    _logged_eval(session, artifact=artifact, generated_at=datetime.now(timezone.utc), horizon=7)
+    path = _offline_payload(
+        tmp_path,
+        """
+        {"schema_version": 2, "evaluation_mode": "multi_step_rolling_origin", "horizon_days": 14,
+         "aggregates": {"regular": {"lightgbm": {"wape": 0.9}}}}
+        """,
+    )
+
+    snapshot = _service(session, offline_path=path).create_snapshot().snapshot
+
+    assert snapshot.baseline_provenance == "unavailable"
+
+
+def test_baseline_constants_match_the_backtest_module():
+    from evaluation import backtest
+    from services import model_monitoring_service as mms
+
+    assert mms.BACKTEST_EVALUATION_MODE == backtest.EVALUATION_MODE
 
 
 def test_stable_when_wape_below_warning_threshold():

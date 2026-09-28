@@ -330,7 +330,9 @@ def test_candidate_evaluation_temporal_split_metrics_benchmarks_and_eligibility(
         horizon_days=30,
     )
 
-    assert result.temporal_split["method"] == "per_sku_last_n_days_holdout"
+    assert result.temporal_split["method"] == "rolling_origin_multi_step"
+    assert result.temporal_split["demand_class"] == "regular"
+    assert result.temporal_split["horizon_days"] == 30
     assert result.test_points == 120
     assert result.candidate_metrics["wape"] == 0.0
     assert result.active_metrics["wape"] == 0.1

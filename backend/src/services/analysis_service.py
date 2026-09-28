@@ -24,6 +24,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from repositories.analysis_repository import AnalysisRepository, serialize_analysis_runs
 from repositories.forecast_evaluation_repository import ForecastEvaluationRepository
 from inventory.business_constraints import SupplierConstraints
+from services.adaptive_forecasting_service import PRODUCTION_HISTORY_DAYS
 from services.model_routing_service import ModelRoutingService
 from services.model_service import ModelService
 from services.forecast_uncertainty_service import ForecastUncertaintyService
@@ -233,7 +234,7 @@ class AnalysisService:
         if self.data_service is not None:
             history = self.data_service.get_demand_history(request.sku)
             if len(history) > 0:
-                return history.tail(60).astype(float), "historical"
+                return history.tail(PRODUCTION_HISTORY_DAYS).astype(float), "historical"
 
         rng = np.random.default_rng(stable_hash_int(request.sku))
         return pd.Series(rng.poisson(20, 30).astype(float)), "synthetic"

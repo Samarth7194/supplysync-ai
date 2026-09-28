@@ -17,6 +17,7 @@ from services.historical_monitoring_replay_service import (
     HistoricalMonitoringReplayError,
     HistoricalMonitoringReplayService,
 )
+from services.adaptive_forecasting_service import PRODUCTION_HISTORY_DAYS
 from services.retraining_decision_service import RetrainingDecisionService
 
 BACKEND_DIR = Path(__file__).resolve().parents[1]
@@ -245,9 +246,10 @@ def test_demand_classification_uses_only_pre_anchor_history():
 
 
 def test_no_future_leakage_adaptive_forecast_never_receives_post_anchor_dates(monkeypatch):
-    import services.historical_monitoring_replay_service as replay_module
+    # The replay calls the shared production forecaster, which calls adaptive_forecast.
+    import evaluation.backtest as backtest_module
 
-    calls = _spy_adaptive_forecast(monkeypatch, replay_module)
+    calls = _spy_adaptive_forecast(monkeypatch, backtest_module)
     series = _regular_series(n_days=130)
     service = _make_service({"SKU-1": series}, model=_ConstantModel(10.0), feature_columns=FEATURE_COLUMNS)
 
@@ -258,6 +260,7 @@ def test_no_future_leakage_adaptive_forecast_never_receives_post_anchor_dates(mo
         anchor = pd.Timestamp(window.anchor_date)
         demand_series = call["demand_series"]
         assert demand_series.index.max() <= anchor
+        assert len(demand_series) <= PRODUCTION_HISTORY_DAYS  # same window the live path uses
 
 
 def test_metrics_are_computed_correctly_against_hand_derived_values():
@@ -423,3 +426,32 @@ def test_mlops_cycle_service_has_no_historical_replay_coupling():
     source = Path(module.__file__).read_text()
     assert "historical_replay" not in source
     assert "HistoricalMonitoringReplayService" not in source
+
+
+def test_replay_reports_the_baseline_scope_it_compares_against():
+    series = _regular_series(n_days=130)
+    service = _make_service({"SKU-1": series}, model=_ConstantModel(10.0), feature_columns=FEATURE_COLUMNS)
+
+    result = service.run(horizon_days=7, sku_limit=1, num_windows=1, min_history_days=60)
+
+    scope = result.baseline_scope
+    assert scope["method"] == "ml_lightgbm"
+    assert scope["demand_class"] == "regular"
+    assert scope["horizon_days"] == 7
+    assert scope["forecast_mode"] == "multi_step_rolling_origin"
+    assert result.as_dict()["baseline_scope"] == scope
+
+
+def test_replay_pads_a_sku_that_stopped_selling_out_to_the_dataset_end():
+    """Trailing zero days of a discontinued SKU must be scored, not silently dropped."""
+    active = _regular_series(n_days=130)
+    stopped = _regular_series(n_days=100)  # last sale 30 days before the dataset ends
+    service = _make_service(
+        {"ACTIVE": active, "STOPPED": stopped}, model=_ConstantModel(10.0), feature_columns=FEATURE_COLUMNS
+    )
+
+    result = service.run(horizon_days=7, sku_limit=2, num_windows=1, min_history_days=60)
+
+    by_sku = {r.sku: r for r in result.windows[0].sku_results}
+    assert "STOPPED" in by_sku
+    assert sum(by_sku["STOPPED"].actual) == 0.0

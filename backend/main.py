@@ -402,6 +402,9 @@ class HistoricalReplayResponse(BaseModel):
     # replayed windows — informational only, never folded into the
     # LightGBM-artifact-scoped status/evaluation_count/metrics above.
     method_breakdown: dict = Field(default_factory=dict)
+    # What baseline_wape is (method, demand class, horizon, forecast mode), so
+    # the comparison can be audited as like-for-like.
+    baseline_scope: Optional[dict] = None
     live_monitoring: LiveMonitoringSummary
     message: Optional[str] = None
 
@@ -890,6 +893,7 @@ async def model_monitoring_replay(
         generated_at=payload.get("generated_at"),
         provenance=payload.get("provenance", "historical_replay"),
         method_breakdown=payload.get("method_breakdown") or {},
+        baseline_scope=payload.get("baseline_scope"),
         live_monitoring=live_summary,
     )
 

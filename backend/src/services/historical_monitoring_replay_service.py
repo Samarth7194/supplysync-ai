@@ -32,9 +32,15 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from evaluation import backtest as bt
 from evaluation.metrics import compute_all
-from services.adaptive_forecasting_service import adaptive_forecast, classify_sku_demand_pattern
-from services.model_monitoring_service import Baseline, ModelMonitoringService, MonitoringMetrics
+from services.adaptive_forecasting_service import PRODUCTION_HISTORY_DAYS, classify_sku_demand_pattern
+from services.model_monitoring_service import (
+    BASELINE_DEMAND_CLASS,
+    Baseline,
+    ModelMonitoringService,
+    MonitoringMetrics,
+)
 
 HISTORICAL_REPLAY_PROVENANCE = "historical_replay"
 ARTIFACT_SCOPED_METHOD = "ml_lightgbm"
@@ -104,6 +110,7 @@ class HistoricalReplayResult:
     historical_period_start: date | None
     historical_period_end: date | None
     method_breakdown: dict[str, dict[str, Any]]
+    baseline_scope: dict[str, Any]
 
     def as_dict(self) -> dict[str, Any]:
         return {
@@ -136,6 +143,7 @@ class HistoricalReplayResult:
                 "end": self.historical_period_end.isoformat() if self.historical_period_end else None,
             },
             "method_breakdown": self.method_breakdown,
+            "baseline_scope": self.baseline_scope,
             "windows": [
                 {
                     "window_index": w.window_index,
@@ -232,6 +240,7 @@ class HistoricalMonitoringReplayService:
                 target_end=target_end,
                 horizon=horizon,
                 min_history_days=min_history_days,
+                dataset_max=dataset_max,
             )
             # Each window's own evaluation count is what matters here — this
             # mirrors live monitoring, where one snapshot's sufficiency comes
@@ -303,7 +312,20 @@ class HistoricalMonitoringReplayService:
             historical_period_start=windows[0].target_start if windows else None,
             historical_period_end=windows[-1].target_end if windows else None,
             method_breakdown=method_breakdown,
+            baseline_scope=self._baseline_scope(horizon),
         )
+
+    @staticmethod
+    def _baseline_scope(horizon: int) -> dict[str, Any]:
+        """What the baseline is, so the comparison is auditable as like-for-like."""
+        return {
+            "method": ARTIFACT_SCOPED_METHOD,
+            "demand_class": BASELINE_DEMAND_CLASS,
+            "horizon_days": horizon,
+            "forecast_mode": bt.EVALUATION_MODE,
+            "metric": "daily_wape",
+            "history_window_days": PRODUCTION_HISTORY_DAYS,
+        }
 
     # -- window construction --------------------------------------------
 
@@ -323,6 +345,18 @@ class HistoricalMonitoringReplayService:
     def _candidate_skus(self, *, sku_limit: int) -> list[str]:
         return self.data_service.get_top_skus(n=sku_limit)
 
+    @staticmethod
+    def _pad_to(series: pd.Series, end: pd.Timestamp) -> pd.Series:
+        """Zero-fill a SKU's series out to the dataset end.
+
+        ``DataService`` stops each series at that SKU's last sale, which would
+        silently drop the trailing zero days of a SKU that stopped selling.
+        """
+        if series.index.max() >= end:
+            return series
+        extended = pd.date_range(series.index.min(), end, freq="D")
+        return series.reindex(extended, fill_value=0.0)
+
     def _evaluate_window(
         self,
         *,
@@ -332,12 +366,16 @@ class HistoricalMonitoringReplayService:
         target_end: pd.Timestamp,
         horizon: int,
         min_history_days: int,
+        dataset_max: pd.Timestamp,
     ) -> list[SkuWindowResult]:
         results: list[SkuWindowResult] = []
+        # Exactly the function the live analysis path and the backtest call.
+        forecaster = bt.production_forecaster(self.model, self.feature_columns)
         for sku in skus:
             series = self.data_service.get_demand_history(sku)
             if series.empty or not isinstance(series.index, pd.DatetimeIndex):
                 continue
+            series = self._pad_to(series, dataset_max)
 
             # History strictly on-or-before the anchor. Slicing at `anchor`
             # cannot include any date after it, so the model never sees
@@ -352,26 +390,18 @@ class HistoricalMonitoringReplayService:
             if len(actual_window) != horizon:
                 continue
 
-            demand_pattern = classify_sku_demand_pattern(history)
-            forecast, method = adaptive_forecast(
-                sku=sku,
-                demand_series=history,
-                horizon=horizon,
-                model=self.model,
-                feature_columns=self.feature_columns,
-                routing_service=None,
-                include_routing=False,
-            )
-            predicted = np.asarray(forecast[:horizon], dtype=float)
+            window = history.tail(PRODUCTION_HISTORY_DAYS)
+            demand_pattern = classify_sku_demand_pattern(window)
+            forecast = forecaster(str(sku), window, horizon)
+            predicted = np.asarray(forecast.values[:horizon], dtype=float)
             actual = actual_window.to_numpy(dtype=float)
-            in_sample = history.to_numpy(dtype=float)
-            metrics = compute_all(actual, predicted, in_sample=in_sample, seasonality=1)
+            metrics = compute_all(actual, predicted, in_sample=window.to_numpy(dtype=float), seasonality=1)
 
             results.append(
                 SkuWindowResult(
                     sku=sku,
                     demand_class=demand_pattern,
-                    forecast_method=method,
+                    forecast_method=forecast.method or "unknown",
                     n_test_points=metrics.n,
                     total_actual_demand=float(actual.sum()),
                     actual=tuple(float(v) for v in actual),

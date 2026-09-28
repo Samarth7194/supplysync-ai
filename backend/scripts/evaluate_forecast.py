@@ -1,311 +1,239 @@
-"""Backtest the forecasting stack against simple baselines.
+"""Multi-step, rolling-origin backtest of the production forecast stack.
 
-For every top-N SKU we:
+Runs ``evaluation.backtest`` (the single shared implementation) over the last
+``--eval-days`` days of the dataset for one or more horizons and writes:
 
-  1. Split the series temporally — last ``HORIZON`` days are the holdout.
-  2. Classify demand pattern (regular / intermittent / highly_intermittent).
-  3. Run one-step-ahead predictions over the holdout for every model below,
-     feeding the real previous-day actuals back each step:
-        - lightgbm    (trained model from saved_models/)
-        - naive_last
-        - seasonal_naive_7
-        - moving_avg_7
-        - croston_sba
-  4. Aggregate MAE, RMSE, bias, WAPE, and MASE per SKU and per demand class.
+  * backend/data/forecast_evaluation.json          (primary horizon)
+  * backend/data/forecast_evaluation_horizons.json (every requested horizon)
+  * matching flat CSV files
 
-Outputs ``backend/data/forecast_evaluation.json`` and
-``forecast_evaluation.csv`` for reference in the README and dashboards.
+At every forecast origin only data up to that origin is visible, the whole
+horizon is forecast in one shot, and the result is scored against the real
+demand that followed. Reference rows (predict-zero, 7-day moving average,
+seasonal naive, Croston-SBA) are always included. A WAPE of 1.0 is what
+predict-zero scores.
 
 Usage:
     cd backend
-    python scripts/evaluate_forecast.py
+    python scripts/evaluate_forecast.py                       # horizons 7,14
+    python scripts/evaluate_forecast.py --horizons 7 --max-skus 200
+    python scripts/evaluate_forecast.py --model tweedie=saved_models/candidates/lightgbm_demand_forecast_tweedie.pkl
 """
 
 from __future__ import annotations
 
+import argparse
 import csv
+import hashlib
 import json
 import os
+import pickle
 import sys
-from dataclasses import asdict
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
-from typing import Dict, List, Optional
 
-import numpy as np
 import pandas as pd
 
 BACKEND_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(BACKEND_DIR))
 sys.path.insert(0, str(BACKEND_DIR / "src"))
 
-from ingestion.load_retail_data import load_sku_demand  # noqa: E402
-from features.inference_features import build_inference_features  # noqa: E402
-from services.adaptive_forecasting_service import classify_sku_demand_pattern  # noqa: E402
-from services.model_service import get_model_service  # noqa: E402
-from evaluation import baselines  # noqa: E402
-from evaluation.metrics import compute_all  # noqa: E402
+from config.settings import load_settings  # noqa: E402
+from evaluation import backtest as bt  # noqa: E402
+from features.schema import feature_columns_for_version, FEATURE_SCHEMA_VERSION  # noqa: E402
+
+DEFAULT_HORIZONS = [7, 14]
+DEFAULT_MAX_SKUS = 500
+DEFAULT_EVAL_DAYS = 30
 
 
-HORIZON = 30               # days held out per SKU for evaluation
-MIN_HISTORY_DAYS = 60      # skip SKUs with less than this
-
-
-def _load_model_and_schema():
-    saved_models_dir = BACKEND_DIR / "saved_models"
-    model_service = get_model_service(model_dir=str(saved_models_dir))
-    try:
-        model = model_service.load_model("lightgbm_demand_forecast")
-    except FileNotFoundError:
-        return None, None
-    meta = model_service.get_model_metadata("lightgbm_demand_forecast") or {}
-    return model, meta.get("features")
-
-
-def _lightgbm_predictions(
-    model,
-    feature_columns: List[str],
-    series: pd.Series,
-    test_window: pd.Series,
-) -> np.ndarray:
-    """One-step-ahead LightGBM predictions over ``test_window``.
-
-    At every step we rebuild the feature row from the history-up-to-yesterday
-    so the model is evaluated on exactly the same preprocessing path the
-    live analyze endpoint uses.
-    """
-    out = np.empty(len(test_window), dtype=float)
-    running = series.loc[: test_window.index[0]].iloc[:-1]  # everything strictly before day 0
-
-    for i, (date, actual) in enumerate(test_window.items()):
-        features = build_inference_features(running, feature_columns)
-        if features is None:
-            out[i] = float(running.tail(7).mean()) if len(running) else 0.0
-        else:
-            pred = float(model.predict(features)[0])
-            out[i] = max(0.0, pred)
-        running = pd.concat([running, pd.Series([actual], index=[date])])
-    return out
-
-
-def _evaluate_sku(
-    sku: str,
-    series: pd.Series,
-    model,
-    feature_columns,
-    horizon: int = HORIZON,
-) -> Optional[dict]:
-    if len(series) < max(MIN_HISTORY_DAYS, horizon + 14):
-        return None
-
-    train = series.iloc[:-horizon]
-    test = series.iloc[-horizon:]
-    if len(test) == 0:
-        return None
-
-    demand_class = classify_sku_demand_pattern(series)
-    in_sample = train.to_numpy(dtype=float)
-    actual = test.to_numpy(dtype=float)
-
-    per_model: Dict[str, dict] = {}
-
-    # Baselines
-    for name, fn in baselines.BASELINES.items():
-        preds = baselines.run_baseline_over_window(train, test, fn)
-        metrics = compute_all(actual, preds, in_sample=in_sample, seasonality=1)
-        per_model[name] = metrics.as_dict()
-
-    # LightGBM
-    if model is not None and feature_columns:
-        try:
-            lgb_preds = _lightgbm_predictions(model, feature_columns, series, test)
-            metrics = compute_all(actual, lgb_preds, in_sample=in_sample, seasonality=1)
-            per_model["lightgbm"] = metrics.as_dict()
-        except Exception as exc:
-            print(f"  [{sku}] LightGBM eval failed: {exc}")
-
-    return {
-        "sku": sku,
-        "demand_class": demand_class,
-        "n_train": int(len(train)),
-        "n_test": int(len(test)),
-        "total_test_demand": float(actual.sum()),
-        "metrics": per_model,
+def _load_artifact(pkl_path: Path) -> tuple[object, list[str], dict]:
+    """Load a pickled model plus its metadata, verifying the recorded checksum."""
+    metadata_path = pkl_path.with_name(pkl_path.name.replace(".pkl", "_metadata.json"))
+    if not metadata_path.exists():
+        # Production artifact keeps a single metadata file name.
+        metadata_path = pkl_path.with_name("lightgbm_demand_forecast_metadata.json")
+    metadata = json.loads(metadata_path.read_text()) if metadata_path.exists() else {}
+    digest = hashlib.sha256(pkl_path.read_bytes()).hexdigest()
+    expected = metadata.get("artifact_checksum")
+    if expected and expected != digest:
+        raise SystemExit(f"Checksum mismatch for {pkl_path.name}: metadata says {expected[:12]}, file is {digest[:12]}")
+    with pkl_path.open("rb") as fh:
+        model = pickle.load(fh)
+    version = metadata.get("feature_schema_version") or FEATURE_SCHEMA_VERSION
+    columns = metadata.get("features") or feature_columns_for_version(version)
+    return model, list(columns), {
+        "version": metadata.get("version"),
+        "feature_schema_version": version,
+        "artifact_checksum": digest,
+        "training_config": metadata.get("training_config"),
     }
 
 
-def _aggregate(
-    sku_results: List[dict],
-    model_names: List[str],
-) -> Dict[str, Dict[str, dict]]:
-    """Weighted averages per model, overall and per demand class.
-
-    WAPE is reaggregated from totals so it stays a true global WAPE rather
-    than an average of per-SKU WAPEs. MAE / RMSE / bias are demand-weighted
-    by ``n_test`` — a SKU with 30 test days counts the same as another SKU
-    with 30 test days, irrespective of volume.
-    """
-    buckets: Dict[str, List[dict]] = {"all": list(sku_results)}
-    for r in sku_results:
-        buckets.setdefault(r["demand_class"], []).append(r)
-
-    out: Dict[str, Dict[str, dict]] = {}
-    for bucket_name, rows in buckets.items():
-        out[bucket_name] = {}
-        for model_name in model_names:
-            relevant = [r for r in rows if model_name in r["metrics"]]
-            if not relevant:
-                continue
-            total_n = sum(r["metrics"][model_name]["n"] for r in relevant)
-            if total_n == 0:
-                continue
-
-            def _wmean(key: str) -> Optional[float]:
-                num = 0.0
-                den = 0
-                for r in relevant:
-                    m = r["metrics"][model_name]
-                    v = m.get(key)
-                    if v is None:
-                        continue
-                    num += v * m["n"]
-                    den += m["n"]
-                return round(num / den, 4) if den else None
-
-            # Global WAPE: sum of |err| / sum of |actual| across all rows.
-            sum_abs_err = 0.0
-            sum_abs_act = 0.0
-            for r in relevant:
-                m = r["metrics"][model_name]
-                if m.get("wape") is None:
-                    continue
-                sum_abs_err += m["wape"] * r["total_test_demand"]
-                sum_abs_act += r["total_test_demand"]
-            global_wape = round(sum_abs_err / sum_abs_act, 4) if sum_abs_act > 0 else None
-
-            out[bucket_name][model_name] = {
-                "mae": _wmean("mae"),
-                "rmse": _wmean("rmse"),
-                "bias": _wmean("bias"),
-                "wape": global_wape,
-                "mase": _wmean("mase"),
-                "n_skus": len(relevant),
-                "n_test_points": total_n,
-            }
-    return out
+def _flat_rows(payloads: dict[str, dict]) -> list[list]:
+    rows = []
+    for horizon, payload in payloads.items():
+        for bucket, methods in payload["aggregates"].items():
+            for method, m in methods.items():
+                rows.append([
+                    horizon, bucket, method, m["wape"], m["wape_lead_time_sum"], m["mae"], m["rmse"],
+                    m["bias"], m["bias_ratio"], m["mase"], m["n_skus"], m["n_origins"], m["n_test_points"],
+                ])
+    return rows
 
 
-def _write_csv(path: Path, sku_results: List[dict], model_names: List[str]) -> None:
-    path.parent.mkdir(parents=True, exist_ok=True)
+def _write_csv(path: Path, payloads: dict[str, dict]) -> None:
     with path.open("w", newline="") as fh:
         writer = csv.writer(fh)
-        writer.writerow(["sku", "demand_class", "model", "mae", "rmse", "bias", "wape", "mase", "n"])
-        for r in sku_results:
-            for model_name in model_names:
-                if model_name not in r["metrics"]:
-                    continue
-                m = r["metrics"][model_name]
-                writer.writerow([
-                    r["sku"], r["demand_class"], model_name,
-                    m.get("mae"), m.get("rmse"), m.get("bias"),
-                    m.get("wape"), m.get("mase"), m.get("n"),
-                ])
+        writer.writerow([
+            "horizon_days", "demand_class", "method", "wape_daily", "wape_lead_time_sum", "mae", "rmse",
+            "bias", "bias_ratio", "mase", "n_skus", "n_origins", "n_test_points",
+        ])
+        writer.writerows(_flat_rows(payloads))
 
 
-def _print_summary(aggregated: Dict[str, Dict[str, dict]], model_names: List[str]) -> None:
-    for bucket in ["all", "regular", "intermittent", "highly_intermittent"]:
-        if bucket not in aggregated or not aggregated[bucket]:
+def build_forecasters(args: argparse.Namespace, artifacts: dict[str, tuple]) -> dict:
+    forecasters = {}
+    prod = artifacts.get("production")
+    if prod is not None:
+        model, columns, _ = prod
+        forecasters[bt.PRODUCTION_ROUTED] = bt.production_forecaster(model, columns)
+        forecasters[bt.LIGHTGBM] = bt.lightgbm_forecaster(model, columns)
+    for label, (model, columns, _) in artifacts.items():
+        if label == "production":
             continue
-        header = f"  {bucket.upper()}"
-        print()
-        print(header)
-        print("  " + "-" * 70)
-        print(f"  {'model':<20} {'MAE':>8} {'RMSE':>8} {'bias':>8} {'WAPE':>8} {'MASE':>8} {'n':>6}")
-        for model_name in model_names:
-            if model_name not in aggregated[bucket]:
+        forecasters[f"lightgbm_{label}"] = bt.lightgbm_forecaster(model, columns)
+    return forecasters
+
+
+def compare_to_strongest_baseline(result: bt.BacktestResult, *, n_boot: int = 300) -> dict:
+    """Per class: who is the strongest baseline, and does each model beat it (with a paired 95% CI)?"""
+    comparisons: dict = {}
+    for bucket in ("all", *bt.DEMAND_CLASSES):
+        methods = result.aggregates.get(bucket) or {}
+        strongest = bt.strongest_baseline(methods)
+        if strongest is None:
+            continue
+        entry = {
+            "metric": "wape_lead_time_sum",
+            "strongest_baseline": {"method": strongest[0], "value": strongest[1]},
+            "methods": {},
+        }
+        for name, metrics in methods.items():
+            if name in bt.REFERENCE_METHODS:
                 continue
-            m = aggregated[bucket][model_name]
+            value = metrics.get("wape_lead_time_sum")
+            entry["methods"][name] = {
+                "beats_strongest_baseline": value is not None and value < strongest[1],
+                "difference_vs_strongest_baseline": bt.bootstrap_wape_ci(
+                    result.per_sku, demand_class=bucket, method=name, reference=strongest[0], n_boot=n_boot
+                ),
+            }
+        comparisons[bucket] = entry
+    return comparisons
 
-            def _fmt(v, suffix=""):
-                return f"{v:>8.2f}{suffix}" if isinstance(v, (int, float)) else f"{'--':>8}{suffix}"
 
-            print(
-                f"  {model_name:<20} "
-                f"{_fmt(m['mae'])} {_fmt(m['rmse'])} {_fmt(m['bias'])} "
-                f"{_fmt(m['wape'])} {_fmt(m['mase'])} {m['n_test_points']:>6}"
-            )
-
-
-def main() -> int:
-    print("=" * 60)
-    print("SupplySync forecast evaluation")
-    print("=" * 60)
-
-    # Honor DATA_PARQUET_PATH env var for bring-your-own-data workflows, fall
-    # back to the default project location otherwise.
+def run(args: argparse.Namespace) -> dict[str, dict]:
     parquet_env = os.environ.get("DATA_PARQUET_PATH")
     parquet_path = Path(parquet_env) if parquet_env else BACKEND_DIR.parent / "data" / "processed" / "daily_demand.parquet"
     if not parquet_path.exists():
-        print(f"Processed dataset missing: {parquet_path}")
-        print("Run `python scripts/bootstrap.py` first.")
-        return 1
-
-    model, feature_columns = _load_model_and_schema()
-    if model is None:
-        print("Trained model not found; evaluating baselines only.")
+        raise SystemExit(f"Processed dataset missing: {parquet_path}\nRun `python scripts/bootstrap.py` first.")
 
     daily = pd.read_parquet(parquet_path)
-    sku_stats = daily.groupby("StockCode").agg(n=("date", "nunique"), total=("demand", "sum"))
-    sku_stats = sku_stats[sku_stats["n"] >= MIN_HISTORY_DAYS]
-    top_skus = sku_stats.nlargest(20, "total").index.tolist()
-    print(
-        f"Evaluating {len(top_skus)} SKUs (>= {MIN_HISTORY_DAYS}-day history) "
-        f"on a {HORIZON}-day holdout."
-    )
+    daily["date"] = pd.to_datetime(daily["date"])
+    dataset_end = daily["date"].max()
+    cutoff = dataset_end - pd.Timedelta(days=args.eval_days)
 
-    sku_results: List[dict] = []
-    for sku in top_skus:
-        series_df = load_sku_demand(sku)
-        if series_df.empty:
-            continue
-        series = pd.Series(
-            series_df["demand"].values, index=pd.DatetimeIndex(series_df["date"])
+    skus = bt.select_eval_skus(daily, cutoff=cutoff, min_active_days=60, max_skus=args.max_skus)
+    series = bt.prepare_sku_series(daily, skus=skus, pad_to=dataset_end)
+    print(f"Backtest: {len(series)} SKUs, dataset_end={dataset_end.date()}, train_cutoff={cutoff.date()}, "
+          f"eval_days={args.eval_days}, stride={args.stride}")
+
+    artifacts: dict[str, tuple] = {}
+    prod_path = BACKEND_DIR / "saved_models" / "lightgbm_demand_forecast.pkl"
+    if prod_path.exists():
+        artifacts["production"] = _load_artifact(prod_path)
+    else:
+        print("Production model artifact not found; evaluating reference methods only.")
+    for spec in args.model or []:
+        label, _, raw = spec.partition("=")
+        path = Path(raw)
+        if not path.is_absolute():
+            path = BACKEND_DIR / path
+        artifacts[label] = _load_artifact(path)
+
+    forecasters = build_forecasters(args, artifacts)
+    model_info = {label: info for label, (_, _, info) in artifacts.items()}
+
+    payloads: dict[str, dict] = {}
+    for horizon in args.horizons:
+        config = bt.BacktestConfig(horizon=horizon, eval_days=args.eval_days, stride=args.stride)
+        print(f"\n=== horizon {horizon} ===")
+        result = bt.run_backtest(
+            series, forecasters, config, dataset_end=dataset_end,
+            progress=lambda done, total: print(f"  {done}/{total} SKUs", end="\r") if done % 50 == 0 or done == total else None,
         )
-        res = _evaluate_sku(sku, series, model, feature_columns)
-        if res is None:
+        print()
+        payloads[str(horizon)] = result.to_payload(extra={
+            "sku_selection": {
+                "min_active_days": 60,
+                "max_skus": args.max_skus,
+                "ranked_on": "total demand on or before train_cutoff",
+                "series_padded_to_dataset_end": True,
+            },
+            "model_artifacts": model_info,
+            "comparisons": compare_to_strongest_baseline(result),
+        })
+        _print_summary(result)
+    return payloads
+
+
+def _print_summary(result: bt.BacktestResult) -> None:
+    print(f"  origins scored: {result.n_origins} (skipped {result.n_skipped_origins}); "
+          f"routed methods: {result.routed_method_counts}")
+    for bucket in ("all", *bt.DEMAND_CLASSES):
+        methods = result.aggregates.get(bucket)
+        if not methods:
             continue
-        sku_results.append(res)
-        print(f"  {sku}  class={res['demand_class']:<20} n_test={res['n_test']}")
+        print(f"  [{bucket}]  {'method':<26}{'WAPE':>8}{'WAPE(sum)':>11}{'bias%':>8}{'MASE':>8}{'origins':>9}")
+        for name, m in sorted(methods.items(), key=lambda kv: (kv[1]['wape_lead_time_sum'] is None, kv[1]['wape_lead_time_sum'])):
+            bias = f"{m['bias_ratio'] * 100:+.0f}" if m["bias_ratio"] is not None else "--"
+            print(f"       {name:<26}{_f(m['wape']):>8}{_f(m['wape_lead_time_sum']):>11}{bias:>8}{_f(m['mase']):>8}{m['n_origins']:>9}")
 
-    if not sku_results:
-        print("No SKUs produced evaluable windows.")
-        return 1
 
-    model_names = list(baselines.BASELINES.keys())
-    if model is not None:
-        model_names.append("lightgbm")
+def _f(value) -> str:
+    return "--" if value is None else f"{value:.3f}"
 
-    aggregated = _aggregate(sku_results, model_names)
-    _print_summary(aggregated, model_names)
 
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
+    parser.add_argument("--horizons", type=lambda s: [int(v) for v in s.split(",")], default=DEFAULT_HORIZONS)
+    parser.add_argument("--max-skus", type=int, default=DEFAULT_MAX_SKUS)
+    parser.add_argument("--eval-days", type=int, default=DEFAULT_EVAL_DAYS)
+    parser.add_argument("--stride", type=int, default=1)
+    parser.add_argument("--model", action="append", metavar="LABEL=PKL", help="Extra LightGBM artifact to score as lightgbm_<LABEL>.")
+    parser.add_argument("--no-write", action="store_true", help="Print results without touching backend/data.")
+    args = parser.parse_args(argv)
+
+    payloads = run(args)
+    if args.no_write:
+        return 0
+
+    primary = load_settings().inventory.default_lead_time_days
+    primary_key = str(primary) if str(primary) in payloads else next(iter(payloads))
     out_dir = BACKEND_DIR / "data"
     out_dir.mkdir(parents=True, exist_ok=True)
-    json_path = out_dir / "forecast_evaluation.json"
-    csv_path = out_dir / "forecast_evaluation.csv"
-
-    payload = {
-        "generated_at": datetime.now().isoformat(),
-        "horizon_days": HORIZON,
-        "n_skus_evaluated": len(sku_results),
-        "models": model_names,
-        "aggregates": aggregated,
-        "per_sku": sku_results,
-    }
-    with json_path.open("w") as fh:
-        json.dump(payload, fh, indent=2)
-    _write_csv(csv_path, sku_results, model_names)
-
-    print(f"\nSaved:\n  {json_path}\n  {csv_path}")
+    (out_dir / "forecast_evaluation.json").write_text(json.dumps(payloads[primary_key], indent=2))
+    (out_dir / "forecast_evaluation_horizons.json").write_text(json.dumps({
+        "schema_version": bt.SCHEMA_VERSION,
+        "evaluation_mode": bt.EVALUATION_MODE,
+        "generated_at": datetime.now(timezone.utc).isoformat(),
+        "horizons_requested": args.horizons,
+        "horizons": payloads,
+    }, indent=2))
+    _write_csv(out_dir / "forecast_evaluation.csv", {primary_key: payloads[primary_key]})
+    _write_csv(out_dir / "forecast_evaluation_horizons.csv", payloads)
+    print(f"\nSaved backend/data/forecast_evaluation*.json/.csv (primary horizon {primary_key})")
     return 0
 
 

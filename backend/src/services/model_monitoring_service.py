@@ -16,6 +16,11 @@ import pandas as pd
 from db.models import ForecastEvaluation, ModelArtifact, ModelMonitoringSnapshot
 from repositories.model_monitoring_repository import ModelMonitoringRepository
 
+# Must match ``evaluation.backtest.EVALUATION_MODE`` (asserted in the tests).
+BACKTEST_EVALUATION_MODE = "multi_step_rolling_origin"
+# LightGBM only serves regular-demand SKUs, so its reference is scoped to them.
+BASELINE_DEMAND_CLASS = "regular"
+
 
 @dataclass(frozen=True)
 class Baseline:
@@ -509,6 +514,14 @@ class ModelMonitoringService:
         return Baseline(None, "unavailable")
 
     def _offline_baseline(self, evaluations: list[ForecastEvaluation]) -> float | None:
+        """Like-for-like offline reference for LightGBM's daily WAPE.
+
+        The reference is the multi-step rolling-origin backtest for the *same
+        horizon*, the *same demand-class scope* LightGBM serves in production
+        (``regular``), and the same forecast mode. Legacy one-step-ahead
+        evidence is deliberately not accepted: comparing a multi-step forecast
+        against a one-step error would manufacture a false "degradation".
+        """
         if self.offline_evaluation_path is None or not self.offline_evaluation_path.exists():
             return None
         horizon = self._first_horizon(evaluations)
@@ -519,8 +532,7 @@ class ModelMonitoringService:
         if horizon is not None:
             horizons = payload.get("horizons")
             if isinstance(horizons, dict):
-                matched = horizons.get(str(horizon))
-                value = self._offline_lightgbm_wape(matched)
+                value = self._offline_lightgbm_wape(horizons.get(str(horizon)))
                 if value is not None:
                     return value
             sibling = self.offline_evaluation_path.with_name("forecast_evaluation_horizons.json")
@@ -532,13 +544,18 @@ class ModelMonitoringService:
                         return value
                 except Exception:  # noqa: BLE001 - baseline is optional
                     pass
+            if payload.get("horizon_days") == horizon:
+                return self._offline_lightgbm_wape(payload)
+            return None
         return self._offline_lightgbm_wape(payload)
 
     @staticmethod
     def _offline_lightgbm_wape(payload: Any) -> float | None:
         if not isinstance(payload, dict):
             return None
-        value = (((payload.get("aggregates") or {}).get("all") or {}).get("lightgbm") or {}).get("wape")
+        if payload.get("evaluation_mode") != BACKTEST_EVALUATION_MODE:
+            return None
+        value = (((payload.get("aggregates") or {}).get(BASELINE_DEMAND_CLASS) or {}).get("lightgbm") or {}).get("wape")
         return float(value) if value is not None else None
 
     @staticmethod
