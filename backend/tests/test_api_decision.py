@@ -91,6 +91,30 @@ def test_decision_why_explains_no_action_when_stock_high():
         assert "no action needed" in res["decision"]["why"].lower()
 
 
+def test_analyze_exposes_routing_block_not_stripped_from_the_response():
+    """Routing metadata used to be popped before serialization; it must now reach the client."""
+    import main as backend_main
+
+    with TestClient(backend_main.app) as c:
+        backend_main._data_service = _StubDataService({"HAS": _regular_series()})
+        res = c.post("/api/analyze", json={"sku": "HAS", "current_stock": 10})
+        assert res.status_code == 200
+        body = res.json()
+
+        assert "routing" in body
+        routing = body["routing"]
+        assert routing is not None
+        expected_keys = {
+            "selected_method", "default_method", "selection_source", "evidence_level",
+            "reason", "metric_name", "selected_metric_value", "baseline_metric_value",
+            "evaluation_sample_size", "evaluation_count", "evidence_age_days", "fallback_used",
+        }
+        assert set(routing.keys()) == expected_keys
+        assert routing["default_method"] == "ml_lightgbm"
+        assert isinstance(routing["reason"], str) and routing["reason"]
+        assert isinstance(routing["fallback_used"], bool)
+
+
 def test_inventory_gap_matches_reorder_point_minus_stock():
     import main as backend_main
 

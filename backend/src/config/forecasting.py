@@ -87,7 +87,14 @@ def load_forecasting_settings() -> ForecastingSettings:
 
     return ForecastingSettings(
         model_path=env_path("MODEL_PATH", BACKEND_DIR / "saved_models"),
-        evidence_routing_enabled=env_bool("EVIDENCE_ROUTING_ENABLED", False),
+        # Enabled by default now that offline routing evidence is the shared
+        # multi-step backtest (evaluation.backtest), validated by schema/mode
+        # markers, gated by sample size, staleness, and a "must beat the
+        # strongest reference baseline" rule — not just "beats the legacy
+        # default." Concretely: with the currently-committed evidence, this
+        # routes regular-demand SKUs to Croston-SBA instead of LightGBM. See
+        # docs/mlops-monitoring.md#evidence-based-routing before deploying.
+        evidence_routing_enabled=env_bool("EVIDENCE_ROUTING_ENABLED", True),
         routing_primary_metric=primary_metric,
         routing_min_evaluation_points=min_points,
         routing_min_relative_improvement=min_improvement,

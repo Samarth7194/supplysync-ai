@@ -37,6 +37,22 @@ export interface ExplanationBlock {
   confidence_note: string;
 }
 
+/** Why this forecast method was chosen, and whether evidence overrode the legacy default. */
+export interface RoutingBlock {
+  selected_method: string;
+  default_method: string;
+  selection_source: "default" | "logged" | "offline" | string;
+  evidence_level: "default" | "sku" | "pattern" | string;
+  reason: string;
+  metric_name?: string | null;
+  selected_metric_value?: number | null;
+  baseline_metric_value?: number | null;
+  evaluation_sample_size: number;
+  evaluation_count: number;
+  evidence_age_days?: number | null;
+  fallback_used: boolean;
+}
+
 export interface DecisionBlock {
   lead_time_days: number;
   lead_time_demand: number;
@@ -94,6 +110,8 @@ export interface SkuAnalysis {
   decision?: DecisionBlock;
   model_info?: ModelInfo;
   explanation?: ExplanationBlock;
+  // Optional for backward compatibility with older backend builds.
+  routing?: RoutingBlock | null;
 }
 
 export interface RecentAnalysis {

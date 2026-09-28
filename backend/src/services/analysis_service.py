@@ -113,9 +113,7 @@ class AnalyzeResult:
     routing: dict[str, Any] | None = None
 
     def to_response_dict(self) -> dict[str, Any]:
-        payload = asdict(self)
-        payload.pop("routing", None)
-        return payload
+        return asdict(self)
 
 
 def stable_hash_int(value: str) -> int:

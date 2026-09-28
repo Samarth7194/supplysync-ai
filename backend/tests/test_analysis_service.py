@@ -46,7 +46,20 @@ class _DataService:
 class _InventoryService:
     forecast_method = "simple_average"
     demand_pattern = "regular"
-    routing = None
+    routing = {
+        "selected_method": "ml_lightgbm",
+        "default_method": "ml_lightgbm",
+        "selection_source": "default",
+        "evidence_level": "default",
+        "reason": "Evidence routing disabled; using the legacy demand-pattern policy.",
+        "metric_name": None,
+        "selected_metric_value": None,
+        "baseline_metric_value": None,
+        "evaluation_sample_size": 0,
+        "evaluation_count": 0,
+        "evidence_age_days": None,
+        "fallback_used": True,
+    }
 
     def get_intelligent_reorder_decision(
         self,
@@ -189,10 +202,12 @@ def test_analysis_service_preserves_response_contract_and_persists_prediction():
         "decision",
         "model_info",
         "explanation",
+        "routing",
     }
     assert response["sku"] == "SKU-1"
     assert response["demand_source"] == "historical"
     assert response["forecast_source"] == "rule_based_estimate"
+    assert response["routing"]["default_method"] == "ml_lightgbm"
     assert response["forecast"]["daily"] == [10.0] * 7
     assert response["forecast"]["full_horizon_daily"] == [10.0] * 7
     assert response["forecast"]["horizon_days"] == 7

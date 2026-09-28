@@ -27,6 +27,20 @@ OFFLINE_METHOD_TO_RUNTIME = {
     "lightgbm": "ml_lightgbm",
     "croston_sba": "croston",
 }
+# Same four methods evaluation.backtest.REFERENCE_METHODS always reports, used
+# here as the bar a candidate must clear before routing switches away from the
+# legacy default — never just "beats the default," which could still lose to
+# a plain moving average.
+REFERENCE_BASELINE_METHODS = ("predict_zero", "moving_avg_7", "seasonal_naive_7", "croston_sba")
+# The shared backtest's evaluation_mode/schema_version (evaluation.backtest).
+# Offline evidence not carrying these is the old one-step format and is never
+# trusted for routing.
+EXPECTED_EVALUATION_MODE = "multi_step_rolling_origin"
+EXPECTED_SCHEMA_VERSION = 2
+# The backtest reports both a per-day WAPE and a lead-time-sum WAPE (the error
+# of the horizon *total*, which is what a reorder point actually consumes).
+# Routing on "wape" means the lead-time-sum figure, not the daily one.
+OFFLINE_LEAD_TIME_METRIC = "wape_lead_time_sum"
 
 
 @dataclass(frozen=True)
@@ -101,14 +115,17 @@ class ModelRoutingService:
             time.min,
             tzinfo=timezone.utc,
         )
+        # No per-SKU offline source: the shared backtest deliberately doesn't persist
+        # per-SKU rows (thousands of SKUs would bloat the evidence file), so SKU-level
+        # evidence comes only from real logged predictions. Offline evidence is
+        # pattern-level only.
         sources = (
-            ("logged", "sku", self._logged_sku_evidence(sku_code, forecast_horizon, generated_after)),
-            ("logged", "pattern", self._logged_pattern_evidence(demand_pattern, forecast_horizon, generated_after)),
-            ("offline", "sku", self._offline_sku_evidence(sku_code, demand_pattern, forecast_horizon, as_of_date)),
-            ("offline", "pattern", self._offline_pattern_evidence(demand_pattern, forecast_horizon, as_of_date)),
+            ("logged", "sku", self._logged_sku_evidence(sku_code, forecast_horizon, generated_after), None),
+            ("logged", "pattern", self._logged_pattern_evidence(demand_pattern, forecast_horizon, generated_after), None),
+            ("offline", "pattern", *self._offline_pattern_evidence(demand_pattern, forecast_horizon, as_of_date)),
         )
 
-        for source, level, evidence in sources:
+        for source, level, evidence, strongest_baseline in sources:
             decision = self._decision_from_evidence(
                 evidence=evidence,
                 eligible_methods=eligible_methods,
@@ -116,6 +133,7 @@ class ModelRoutingService:
                 source=source,
                 level=level,
                 as_of_date=as_of_date,
+                strongest_baseline=strongest_baseline,
             )
             if decision is not None:
                 return decision
@@ -150,6 +168,7 @@ class ModelRoutingService:
         source: str,
         level: str,
         as_of_date: date,
+        strongest_baseline: float | None = None,
     ) -> RoutingDecision | None:
         usable = {
             row.method: row
@@ -204,6 +223,32 @@ class ModelRoutingService:
                     f"{relative_improvement:.1%}, below the configured "
                     f"{self.settings.routing_min_relative_improvement:.1%} threshold; "
                     "retaining the default method for stability."
+                ),
+                metric_name=self.settings.routing_primary_metric,
+                selected_metric_value=default_perf.metric_value,
+                baseline_metric_value=default_perf.metric_value,
+                evaluation_sample_size=best.sample_size,
+                evaluation_count=best.evaluation_count,
+                evidence_age_days=age_days,
+                fallback_used=False,
+            )
+
+        # A candidate switching away from the default must also beat the strongest
+        # reference baseline (predict-zero / moving average / seasonal naive /
+        # Croston-SBA) for this class, not just the default — beating a weak
+        # default is not the same as being a good method. Only computable for
+        # offline evidence, which always reports all four references; logged
+        # evidence never runs them live, so this gate is skipped there.
+        if strongest_baseline is not None and best.metric_value > strongest_baseline:
+            return RoutingDecision(
+                selected_method=default_method,
+                default_method=default_method,
+                selection_source=source,
+                evidence_level=level,
+                reason=(
+                    f"{best.method} beat the default {default_method} but not the strongest "
+                    f"reference baseline ({self.settings.routing_primary_metric}={strongest_baseline:.4f}); "
+                    "retaining the default method."
                 ),
                 metric_name=self.settings.routing_primary_metric,
                 selected_metric_value=default_perf.metric_value,
@@ -271,52 +316,38 @@ class ModelRoutingService:
             logger.warning("Logged pattern routing evidence unavailable for %s: %s", demand_pattern, exc)
             return []
 
-    def _offline_sku_evidence(
-        self,
-        sku_code: str,
-        demand_pattern: str,
-        forecast_horizon: int,
-        as_of_date: date,
-    ) -> list[MethodPerformance]:
-        payload = self._offline_payload(forecast_horizon)
-        if not payload or payload.get("horizon_days") != forecast_horizon:
-            return []
-        generated_at = self._parse_datetime(payload.get("generated_at"))
-        if self._is_stale(generated_at, as_of_date):
-            return []
-        for row in payload.get("per_sku") or []:
-            if row.get("sku") == sku_code and row.get("demand_class") == demand_pattern:
-                return self._offline_metrics_to_performance(
-                    metrics=row.get("metrics") or {},
-                    horizon_days=forecast_horizon,
-                    generated_at=generated_at,
-                    evidence_level="sku",
-                )
-        return []
-
     def _offline_pattern_evidence(
         self,
         demand_pattern: str,
         forecast_horizon: int,
         as_of_date: date,
-    ) -> list[MethodPerformance]:
+    ) -> tuple[list[MethodPerformance], float | None]:
         payload = self._offline_payload(forecast_horizon)
         if not payload or payload.get("horizon_days") != forecast_horizon:
-            return []
+            return [], None
         generated_at = self._parse_datetime(payload.get("generated_at"))
         if self._is_stale(generated_at, as_of_date):
-            return []
+            return [], None
         aggregate = (payload.get("aggregates") or {}).get(demand_pattern)
         if not aggregate:
-            return []
-        return self._offline_metrics_to_performance(
+            return [], None
+        evidence = self._offline_metrics_to_performance(
             metrics=aggregate,
             horizon_days=forecast_horizon,
             generated_at=generated_at,
             evidence_level="pattern",
         )
+        return evidence, self._strongest_offline_baseline(aggregate)
 
     def _offline_payload(self, forecast_horizon: int | None = None) -> dict[str, Any] | None:
+        """Load and validate offline routing evidence.
+
+        Only the shared multi-step backtest's output is ever trusted here — a
+        one-step-ahead evaluation would make "beats the default" and "beats the
+        strongest baseline" both meaningless, since a multi-step forecast would
+        be judged against a different (and easier) task than the one it was
+        actually scored on.
+        """
         if self.offline_evaluation_path is None or not self.offline_evaluation_path.exists():
             return None
         try:
@@ -325,24 +356,55 @@ class ModelRoutingService:
         except Exception as exc:  # noqa: BLE001 - evidence is optional
             logger.warning("Offline routing evidence unreadable: %s", exc)
             return None
+
+        resolved = payload
         if forecast_horizon is not None:
+            resolved = None
             horizons = payload.get("horizons")
             if isinstance(horizons, dict):
                 matched = horizons.get(str(forecast_horizon))
                 if isinstance(matched, dict):
-                    return matched
+                    resolved = matched
 
-            sibling = self.offline_evaluation_path.with_name("forecast_evaluation_horizons.json")
-            if sibling.exists():
-                try:
-                    with sibling.open() as fh:
-                        multi_payload = json.load(fh)
-                    matched = (multi_payload.get("horizons") or {}).get(str(forecast_horizon))
-                    if isinstance(matched, dict):
-                        return matched
-                except Exception as exc:  # noqa: BLE001 - optional bootstrap evidence
-                    logger.warning("Multi-horizon offline evidence unreadable: %s", exc)
-        return payload
+            if resolved is None:
+                sibling = self.offline_evaluation_path.with_name("forecast_evaluation_horizons.json")
+                if sibling.exists():
+                    try:
+                        with sibling.open() as fh:
+                            multi_payload = json.load(fh)
+                        matched = (multi_payload.get("horizons") or {}).get(str(forecast_horizon))
+                        if isinstance(matched, dict):
+                            resolved = matched
+                    except Exception as exc:  # noqa: BLE001 - optional bootstrap evidence
+                        logger.warning("Multi-horizon offline evidence unreadable: %s", exc)
+
+            if resolved is None:
+                resolved = payload
+
+        if not self._is_valid_backtest_payload(resolved):
+            return None
+        return resolved
+
+    @staticmethod
+    def _is_valid_backtest_payload(payload: dict[str, Any]) -> bool:
+        return (
+            payload.get("schema_version") == EXPECTED_SCHEMA_VERSION
+            and payload.get("evaluation_mode") == EXPECTED_EVALUATION_MODE
+        )
+
+    def _offline_metric_key(self) -> str:
+        if self.settings.routing_primary_metric == "wape":
+            return OFFLINE_LEAD_TIME_METRIC
+        return self.settings.routing_primary_metric
+
+    def _strongest_offline_baseline(self, metrics: dict[str, Any]) -> float | None:
+        key = self._offline_metric_key()
+        values = [
+            float(metrics[name][key])
+            for name in REFERENCE_BASELINE_METHODS
+            if isinstance(metrics.get(name), dict) and metrics[name].get(key) is not None
+        ]
+        return min(values) if values else None
 
     def _offline_metrics_to_performance(
         self,
@@ -353,11 +415,12 @@ class ModelRoutingService:
         evidence_level: str,
     ) -> list[MethodPerformance]:
         rows: list[MethodPerformance] = []
+        metric_key = self._offline_metric_key()
         for offline_method, values in metrics.items():
             method = OFFLINE_METHOD_TO_RUNTIME.get(offline_method)
             if method is None or method not in RUNTIME_METHODS:
                 continue
-            metric_value = values.get(self.settings.routing_primary_metric)
+            metric_value = values.get(metric_key)
             if metric_value is None:
                 continue
             rows.append(

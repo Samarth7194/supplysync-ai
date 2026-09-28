@@ -25,6 +25,7 @@ import {
   type DecisionBlock,
   type ModelInfo,
   type ExplanationBlock,
+  type RoutingBlock,
 } from "@/lib/api";
 import { EmptyState } from "@/components/EmptyState";
 import { InfoRow } from "@/components/InfoRow";
@@ -87,6 +88,7 @@ interface Analysis {
   decision?: DecisionBlock;
   model_info?: ModelInfo;
   explanation?: ExplanationBlock;
+  routing?: RoutingBlock | null;
 }
 
 interface HistoryPoint {
@@ -1036,6 +1038,33 @@ export default function SKUDetail() {
             <p className="text-[11px] text-gray-500 border-t border-gray-800 pt-3 mt-5 leading-relaxed">
               {analysis.explanation.confidence_note}
             </p>
+            {analysis.routing && (
+              <p
+                className="text-[11px] text-gray-500 border-t border-gray-800 pt-3 mt-3 leading-relaxed"
+                title={analysis.routing.reason}
+              >
+                <span className="text-gray-400 uppercase tracking-wider">Routing evidence</span>
+                {": "}
+                {analysis.routing.selection_source === "default" ? (
+                  <>legacy demand-pattern default ({formatForecastMethod(analysis.routing.default_method)})</>
+                ) : (
+                  <>
+                    {analysis.routing.selection_source} · {analysis.routing.evidence_level}-level evidence
+                    {analysis.routing.selected_metric_value != null && analysis.routing.metric_name && (
+                      <>
+                        {" "}
+                        · selected {formatForecastMethod(analysis.routing.selected_method)} at{" "}
+                        {analysis.routing.metric_name}={analysis.routing.selected_metric_value.toFixed(3)}
+                        {analysis.routing.baseline_metric_value != null &&
+                          ` vs default ${analysis.routing.baseline_metric_value.toFixed(3)}`}
+                      </>
+                    )}
+                    {analysis.routing.evaluation_sample_size > 0 &&
+                      ` (${analysis.routing.evaluation_sample_size} evaluated points)`}
+                  </>
+                )}
+              </p>
+            )}
           </div>
         )}
 

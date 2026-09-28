@@ -220,19 +220,29 @@ def test_wrong_horizon_offline_evidence_is_ignored(tmp_path):
     assert decision.selected_method == "ml_lightgbm"
 
 
+def _multi_step_aggregate(lightgbm_wape: float, croston_wape: float) -> dict:
+    """A regular-class aggregate block shaped like the real shared-backtest payload:
+    schema-versioned, with lead-time-sum WAPE, and all four reference baselines so
+    the "beats the strongest baseline" gate has something to compare against."""
+    return {
+        "lightgbm": {"wape": lightgbm_wape, "wape_lead_time_sum": lightgbm_wape, "n_test_points": 100, "bias": 0.0},
+        "croston_sba": {"wape": croston_wape, "wape_lead_time_sum": croston_wape, "n_test_points": 100, "bias": 0.0},
+        "predict_zero": {"wape": 1.0, "wape_lead_time_sum": 1.0, "n_test_points": 100, "bias": -1.0},
+        "moving_avg_7": {"wape": 0.9, "wape_lead_time_sum": 0.9, "n_test_points": 100, "bias": 0.05},
+        "seasonal_naive_7": {"wape": 0.95, "wape_lead_time_sum": 0.95, "n_test_points": 100, "bias": 0.05},
+    }
+
+
 def test_offline_pattern_evidence_can_bootstrap_when_horizon_matches(tmp_path):
     path = tmp_path / "forecast_evaluation.json"
     path.write_text(
         json.dumps(
             {
+                "schema_version": 2,
+                "evaluation_mode": "multi_step_rolling_origin",
                 "generated_at": "2026-08-01T00:00:00+00:00",
                 "horizon_days": 30,
-                "aggregates": {
-                    "regular": {
-                        "lightgbm": {"wape": 1.0, "n_test_points": 100, "bias": 0.0},
-                        "croston_sba": {"wape": 0.7, "n_test_points": 100, "bias": 0.0},
-                    }
-                },
+                "aggregates": {"regular": _multi_step_aggregate(lightgbm_wape=1.0, croston_wape=0.7)},
             }
         )
     )
@@ -249,11 +259,66 @@ def test_offline_pattern_evidence_can_bootstrap_when_horizon_matches(tmp_path):
     assert decision.evidence_level == "pattern"
 
 
+def test_offline_evidence_without_the_multi_step_schema_marker_is_rejected(tmp_path):
+    """Old one-step-ahead evidence must never drive a routing switch."""
+    path = tmp_path / "forecast_evaluation.json"
+    path.write_text(
+        json.dumps(
+            {
+                "generated_at": "2026-08-01T00:00:00+00:00",
+                "horizon_days": 30,
+                "aggregates": {"regular": _multi_step_aggregate(lightgbm_wape=1.0, croston_wape=0.7)},
+            }
+        )
+    )
+
+    decision = _router(_Repo(), offline_path=path).select_method(
+        sku_code="SKU-1",
+        demand_pattern="regular",
+        forecast_horizon=30,
+        as_of_date=date(2026, 8, 8),
+    )
+
+    assert decision.selected_method == "ml_lightgbm"
+    assert decision.selection_source == "default"
+
+
+def test_offline_evidence_that_beats_default_but_not_the_strongest_baseline_is_not_selected(tmp_path):
+    """Beating the (weak) default is not enough; the candidate must beat the best reference too."""
+    # croston (0.95) beats the default lightgbm (1.0) by >5%, but moving_avg_7 (0.9) still beats croston,
+    # so croston must not be selected even though it clears the relative-improvement threshold.
+    aggregate = _multi_step_aggregate(lightgbm_wape=1.0, croston_wape=0.95)
+    path = tmp_path / "forecast_evaluation.json"
+    path.write_text(
+        json.dumps(
+            {
+                "schema_version": 2,
+                "evaluation_mode": "multi_step_rolling_origin",
+                "generated_at": "2026-08-01T00:00:00+00:00",
+                "horizon_days": 30,
+                "aggregates": {"regular": aggregate},
+            }
+        )
+    )
+
+    decision = _router(_Repo(), offline_path=path).select_method(
+        sku_code="SKU-1",
+        demand_pattern="regular",
+        forecast_horizon=30,
+        as_of_date=date(2026, 8, 8),
+    )
+
+    assert decision.selected_method == "ml_lightgbm"
+    assert "strongest reference baseline" in decision.reason
+
+
 def test_offline_multi_horizon_sibling_evidence_is_used_when_horizon_matches(tmp_path):
     path = tmp_path / "forecast_evaluation.json"
     path.write_text(
         json.dumps(
             {
+                "schema_version": 2,
+                "evaluation_mode": "multi_step_rolling_origin",
                 "generated_at": "2026-08-01T00:00:00+00:00",
                 "horizon_days": 30,
                 "aggregates": {},
@@ -263,17 +328,16 @@ def test_offline_multi_horizon_sibling_evidence_is_used_when_horizon_matches(tmp
     (tmp_path / "forecast_evaluation_horizons.json").write_text(
         json.dumps(
             {
+                "schema_version": 2,
+                "evaluation_mode": "multi_step_rolling_origin",
                 "generated_at": "2026-08-01T00:00:00+00:00",
                 "horizons": {
                     "7": {
+                        "schema_version": 2,
+                        "evaluation_mode": "multi_step_rolling_origin",
                         "generated_at": "2026-08-01T00:00:00+00:00",
                         "horizon_days": 7,
-                        "aggregates": {
-                            "regular": {
-                                "lightgbm": {"wape": 1.0, "n_test_points": 100, "bias": 0.0},
-                                "croston_sba": {"wape": 0.7, "n_test_points": 100, "bias": 0.0},
-                            }
-                        },
+                        "aggregates": {"regular": _multi_step_aggregate(lightgbm_wape=1.0, croston_wape=0.7)},
                     }
                 },
             }

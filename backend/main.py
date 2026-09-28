@@ -458,6 +458,30 @@ class DecisionBlock(BaseModel):
     uncertainty: dict = Field(default_factory=dict)
 
 
+class RoutingBlock(BaseModel):
+    """Why this forecast method was chosen, and whether evidence overrode the default.
+
+    ``selection_source`` is "default" (the legacy demand-pattern policy),
+    "logged" (real logged predictions for this SKU or pattern), or "offline"
+    (the shared multi-step backtest). ``fallback_used=True`` means the legacy
+    default was used — either because evidence routing is disabled, or because
+    no evidence cleared the sample-size/staleness/improvement/strongest-
+    baseline bars required to switch away from it.
+    """
+    selected_method: str
+    default_method: str
+    selection_source: str
+    evidence_level: str
+    reason: str
+    metric_name: Optional[str] = None
+    selected_metric_value: Optional[float] = None
+    baseline_metric_value: Optional[float] = None
+    evaluation_sample_size: int = 0
+    evaluation_count: int = 0
+    evidence_age_days: Optional[int] = None
+    fallback_used: bool = True
+
+
 class AnalyzeResponse(BaseModel):
     sku: str
     risk: str
@@ -476,6 +500,8 @@ class AnalyzeResponse(BaseModel):
     decision: DecisionBlock
     model_info: ModelInfo
     explanation: ExplanationBlock
+    # Backward-compatible addition: previously always omitted from the response.
+    routing: Optional[RoutingBlock] = None
 
 
 # --- Routes ---

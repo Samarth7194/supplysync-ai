@@ -44,7 +44,7 @@ def test_settings_defaults(monkeypatch):
     settings = load_settings()
 
     assert settings.forecasting.model_path == str(BACKEND_DIR / "saved_models")
-    assert settings.forecasting.evidence_routing_enabled is False
+    assert settings.forecasting.evidence_routing_enabled is True
     assert settings.forecasting.routing_primary_metric == "wape"
     assert settings.forecasting.routing_min_evaluation_points == 30
     assert settings.forecasting.routing_min_relative_improvement == 0.05
