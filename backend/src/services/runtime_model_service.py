@@ -17,7 +17,7 @@ from sqlalchemy.orm import Session
 from db.models import ModelArtifact
 from repositories.model_artifact_repository import ModelArtifactRepository
 from services.model_service import ModelArtifactValidationError, ModelService
-from features.schema import FEATURE_COLUMNS, FEATURE_SCHEMA_VERSION, feature_schema_checksum
+from features.schema import FEATURE_COLUMNS, FeatureSchemaError, validate_feature_schema
 
 
 MODEL_NAME = "lightgbm_demand_forecast"
@@ -86,12 +86,17 @@ def validate_artifact_record(artifact: ModelArtifact, *, model_dir: str | Path) 
         checksum = ModelService.checksum_file(path)
         if checksum != artifact.artifact_checksum:
             raise RuntimeModelLoadError("Artifact checksum does not match registered checksum.")
-    if artifact.feature_schema_version and artifact.feature_schema_version != FEATURE_SCHEMA_VERSION:
-        raise RuntimeModelLoadError("Artifact feature schema version does not match runtime schema.")
-    if artifact.feature_schema and list(artifact.feature_schema) != FEATURE_COLUMNS:
-        raise RuntimeModelLoadError("Artifact feature columns do not match runtime schema.")
-    if artifact.feature_schema_checksum and artifact.feature_schema_checksum != feature_schema_checksum(FEATURE_COLUMNS):
-        raise RuntimeModelLoadError("Artifact feature schema checksum does not match runtime schema.")
+    # Validated against the schema version this artifact declares, not just
+    # the newest one — an older artifact keeps loading after a newer schema
+    # is registered.
+    try:
+        validate_feature_schema(
+            artifact.feature_schema_version,
+            artifact.feature_schema,
+            artifact.feature_schema_checksum,
+        )
+    except FeatureSchemaError as exc:
+        raise RuntimeModelLoadError(str(exc)) from exc
     return path
 
 

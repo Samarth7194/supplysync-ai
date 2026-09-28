@@ -116,11 +116,31 @@ def test_feature_schema_mismatch_is_rejected(tmp_path):
     service, _ = _save_valid_model(tmp_path)
     metadata_path = tmp_path / "lightgbm_demand_forecast_metadata.json"
     text = metadata_path.read_text()
-    metadata_path.write_text(text.replace(FEATURE_SCHEMA_VERSION, "future_schema_v2"))
+    metadata_path.write_text(text.replace(FEATURE_SCHEMA_VERSION, "not_a_registered_schema"))
     service.clear_cache("lightgbm_demand_forecast")
 
-    with pytest.raises(ModelArtifactValidationError, match="Feature schema mismatch"):
+    with pytest.raises(ModelArtifactValidationError, match="Unknown feature schema version"):
         service.load_model("lightgbm_demand_forecast", use_cache=False)
+
+
+def test_older_registered_schema_version_still_validates(tmp_path):
+    """An artifact trained on an older, still-registered schema must keep validating."""
+    from features.schema import FEATURE_COLUMNS_V1, FEATURE_SCHEMA_V1, feature_schema_checksum
+
+    service = ModelService(model_dir=str(tmp_path))
+    model = _TinyModel()
+    service.save_model(
+        model,
+        "lightgbm_demand_forecast",
+        metadata={
+            "features": FEATURE_COLUMNS_V1,
+            "feature_schema_version": FEATURE_SCHEMA_V1,
+            "feature_schema_checksum": feature_schema_checksum(FEATURE_COLUMNS_V1, FEATURE_SCHEMA_V1),
+        },
+    )
+
+    # No exception: v1 is a real, registered schema, just not the newest one.
+    service.validate_model_artifact("lightgbm_demand_forecast")
 
 
 def test_register_and_promote_model_artifact_with_evidence(tmp_path):

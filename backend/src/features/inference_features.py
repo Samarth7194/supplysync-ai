@@ -5,10 +5,13 @@ computes every column for one target date from the values observed *before*
 that date. ``build_inference_features`` wraps it for the common case (a single
 next-day row from a raw series); ``forecasting.forecast_service.recursive_forecast``
 calls it once per step of a multi-day forecast, extending the series with each
-prediction so lags, rolling stats, and calendar features all stay correct and
-advance with the date across the whole horizon. ``tests/test_recursive_forecast.py``
-asserts this agrees exactly with the vectorised training-time pipeline
-(``features.lag_features`` + ``features.time_features``).
+prediction so lags, rolling stats, calendar features, and SKU-profile features
+all stay correct and advance with the date across the whole horizon.
+``tests/test_recursive_forecast.py`` asserts this agrees exactly with the
+vectorised training-time pipeline (``features.lag_features`` +
+``features.time_features`` + ``features.sku_features``). A schema that doesn't
+reference the SKU-profile columns (``demand_lag_calendar_v1``) is unaffected —
+only requested columns are ever computed.
 """
 
 from __future__ import annotations
@@ -20,6 +23,7 @@ import numpy as np
 import pandas as pd
 
 MIN_HISTORY_FOR_INFERENCE = 14  # needed for a non-NaN rolling_mean_14
+SKU_FEATURE_WINDOW = 28  # matches features.sku_features.SKU_WINDOW
 
 _NAN = float("nan")
 
@@ -64,6 +68,19 @@ def feature_vector(
             value = float(target_date.day)
         elif name == "week_of_year":
             value = float(target_date.isocalendar().week)
+        elif name in ("zero_share_28", "mean_28", "cv_28"):
+            w = SKU_FEATURE_WINDOW
+            if n < w:
+                value = _NAN
+            else:
+                window = arr[-w:]
+                mean = float(window.mean())
+                if name == "zero_share_28":
+                    value = float((window == 0).mean())
+                elif name == "mean_28":
+                    value = mean
+                else:
+                    value = float(window.std(ddof=1) / mean) if mean > 0 else 0.0
         else:
             raise KeyError(f"Unknown feature column: {name!r}")
         cache[name] = value

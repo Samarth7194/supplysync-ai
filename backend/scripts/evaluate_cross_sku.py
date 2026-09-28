@@ -35,6 +35,7 @@ from lightgbm import LGBMRegressor  # noqa: E402
 from ingestion.load_retail_data import load_sku_demand  # noqa: E402
 from features.lag_features import create_lag_features  # noqa: E402
 from features.schema import FEATURE_COLUMNS  # noqa: E402
+from features.sku_features import create_sku_features  # noqa: E402
 from features.time_features import create_time_features  # noqa: E402
 from services.adaptive_forecasting_service import classify_sku_demand_pattern  # noqa: E402
 from evaluation import baselines  # noqa: E402
@@ -48,6 +49,7 @@ MIN_HISTORY_DAYS = 60
 def _prepare_sku_features(sku_df: pd.DataFrame) -> pd.DataFrame:
     df = create_lag_features(sku_df, target_col="demand")
     df = create_time_features(df, date_col="date")
+    df = create_sku_features(df, target_col="demand")
     return df.dropna(subset=FEATURE_COLUMNS)
 
 

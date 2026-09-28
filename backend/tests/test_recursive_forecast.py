@@ -21,12 +21,15 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "src"))
 
 from features.inference_features import build_inference_features, feature_vector  # noqa: E402
 from features.lag_features import create_lag_features  # noqa: E402
-from features.schema import FEATURE_COLUMNS  # noqa: E402
+from features.schema import FEATURE_COLUMNS_V1  # noqa: E402
 from features.time_features import create_time_features  # noqa: E402
 from forecasting.forecast_service import recursive_forecast  # noqa: E402
 from services.adaptive_forecasting_service import adaptive_forecast  # noqa: E402
 
-V1 = FEATURE_COLUMNS
+# Pinned to v1 explicitly: this file tests the recursion fix (calendar advance,
+# rolling-stat correctness), which is schema-version-agnostic. Using "latest"
+# here would silently start testing v2's SKU features instead.
+V1 = FEATURE_COLUMNS_V1
 
 
 class _RecordingModel:

@@ -12,7 +12,13 @@ from typing import Any, Dict, Optional
 
 import pandas as pd
 
-from features.schema import FEATURE_COLUMNS, FEATURE_SCHEMA_VERSION, feature_schema_checksum
+from features.schema import (
+    FEATURE_COLUMNS,
+    FEATURE_SCHEMA_VERSION,
+    FeatureSchemaError,
+    feature_schema_checksum,
+    validate_feature_schema,
+)
 
 
 class ModelArtifactValidationError(Exception):
@@ -213,18 +219,18 @@ class ModelService:
                     f"Checksum mismatch for {model_name}: expected {expected_checksum}, got {actual_checksum}"
                 )
 
-        feature_version = metadata.get("feature_schema_version")
-        if feature_version and feature_version != FEATURE_SCHEMA_VERSION:
-            raise ModelArtifactValidationError(
-                f"Feature schema mismatch for {model_name}: artifact={feature_version}, runtime={FEATURE_SCHEMA_VERSION}"
+        # Validated against the schema version *this artifact* declares, not
+        # just the newest one — an older artifact (including whichever one is
+        # currently active in production) must keep loading after a newer
+        # schema is registered.
+        try:
+            validate_feature_schema(
+                metadata.get("feature_schema_version"),
+                metadata.get("features"),
+                metadata.get("feature_schema_checksum"),
             )
-
-        features = metadata.get("features")
-        if features and list(features) != FEATURE_COLUMNS:
-            raise ModelArtifactValidationError("Artifact feature column order does not match runtime schema")
-        expected_feature_checksum = metadata.get("feature_schema_checksum")
-        if expected_feature_checksum and expected_feature_checksum != feature_schema_checksum(FEATURE_COLUMNS):
-            raise ModelArtifactValidationError("Artifact feature schema checksum does not match runtime schema")
+        except FeatureSchemaError as exc:
+            raise ModelArtifactValidationError(str(exc)) from exc
 
         return metadata
 

@@ -47,7 +47,7 @@ class _TinyRegressor:
     def __init__(self, **kwargs):
         self.kwargs = kwargs
 
-    def fit(self, X, y):
+    def fit(self, X, y, **kwargs):
         return self
 
     def predict(self, X):

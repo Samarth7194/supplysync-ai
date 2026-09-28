@@ -9,6 +9,7 @@ See ``docs/bring-your-own-data.md`` for worked examples.
 """
 
 import os
+from functools import lru_cache
 from pathlib import Path
 from typing import Dict, Optional, Union
 
@@ -135,15 +136,32 @@ def aggregate_daily_demand(df: pd.DataFrame, output_path: Optional[PathLike] = N
     return daily
 
 
-def get_top_skus(daily_demand_df: pd.DataFrame, min_days: int = 60, top_n: int = 20) -> list:
+def get_top_skus(daily_demand_df: pd.DataFrame, min_days: int = 60, top_n: int | None = 20) -> list:
+    """SKUs with at least ``min_days`` of recorded demand, by total volume.
+
+    ``top_n=None`` returns every qualifying SKU (sorted, most-volume first)
+    instead of capping at a fixed count.
+    """
     sku_stats = daily_demand_df.groupby("StockCode").agg(
         n_days=("date", "nunique"),
         total_demand=("demand", "sum")
     ).reset_index()
 
     qualified = sku_stats[sku_stats["n_days"] >= min_days]
-    top = qualified.nlargest(top_n, "total_demand")
+    top = qualified.nlargest(top_n, "total_demand") if top_n is not None else qualified.sort_values("total_demand", ascending=False)
     return top["StockCode"].tolist()
+
+
+@lru_cache(maxsize=4)
+def _read_daily_demand_cached(parquet_path: str) -> pd.DataFrame:
+    """Avoid re-reading the same parquet file from disk for every SKU in a loop.
+
+    Training/evaluation scripts call ``load_sku_demand`` once per SKU — over a
+    few thousand SKUs that's a few thousand redundant full-file reads without
+    this cache. Safe for a single process's lifetime; a fresh process (a new
+    script run) always re-reads.
+    """
+    return pd.read_parquet(parquet_path)
 
 
 def load_sku_demand(sku: str, parquet_path: Optional[PathLike] = None) -> pd.DataFrame:
@@ -154,7 +172,7 @@ def load_sku_demand(sku: str, parquet_path: Optional[PathLike] = None) -> pd.Dat
         else:
             parquet_path = _project_root() / "data" / "processed" / "daily_demand.parquet"
 
-    daily = pd.read_parquet(parquet_path)
+    daily = _read_daily_demand_cached(str(parquet_path))
     sku_data = daily[daily["StockCode"] == sku].copy()
 
     if len(sku_data) == 0:
