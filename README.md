@@ -24,7 +24,7 @@ The deployed demo runs on a historical retail transaction dataset — there is n
 - **Uncertainty-aware safety stock** — rolling residual sigma when evidence exists, Z-score × σ × √lead-time otherwise
 - **Controlled MLOps lifecycle** — prediction logging → evaluation → monitoring → degradation detection → retraining recommendation → candidate training/evaluation → human-approved promotion → rollback, with a full audit trail
 - **Historical Monitoring Replay** — demonstrates the monitoring pipeline honestly against held-out historical data instead of fabricating live telemetry
-- **280 backend tests** (pytest) + **30 frontend tests** (typecheck + lint clean) + PostgreSQL integration tests, all in CI
+- **280 backend tests** (pytest) + **35 frontend tests** (typecheck + lint clean) + PostgreSQL integration tests, all in CI
 - **Deployed full-stack**: Next.js on Vercel, FastAPI on Render, PostgreSQL on Neon
 
 ---
@@ -301,7 +301,7 @@ Never commit real values for `SESSION_SECRET`, `DATABASE_URL`, or `API_KEY` — 
 | Check | Command | Result |
 |---|---|---|
 | Backend tests | `cd backend && python -m pytest tests/ -q` | 280 passed, 8 skipped |
-| Frontend tests | `cd frontend && npm test` | 30 passed, typecheck clean, lint clean |
+| Frontend tests | `cd frontend && npm test` | 35 passed, typecheck clean, lint clean |
 | Frontend build | `cd frontend && npm run build` | Passes |
 | Alembic | `cd backend && python -m alembic heads` | Single head |
 | CI | [`.github/workflows/test.yml`](.github/workflows/test.yml) | backend-tests, frontend-checks, postgres-integration on every push/PR to `main` |
