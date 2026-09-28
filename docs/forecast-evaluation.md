@@ -20,12 +20,12 @@ Hybrid routing used: {"conservative": 272, "croston": 447, "ml_lightgbm": 4081}
 
 | Method | WAPE (lead-time sum) | WAPE (daily) | Bias | MASE | Origins | vs strongest baseline (95% CI) |
 |---|---:|---:|---:|---:|---:|---|
-| Croston-SBA | 0.444 | 0.893 | -2% | 0.805 | 4081 | reference |
+| Croston-SBA | 0.444 | 0.893 | -2% | 0.805 | 4081 | strongest baseline |
 | 7-day moving average | 0.544 | 0.950 | +5% | 0.859 | 4081 | reference |
 | seasonal naive (7) | 0.544 | 0.992 | +5% | 0.911 | 4081 | reference |
 | predict zero | 1.000 | 1.000 | -100% | 0.873 | 4081 | reference |
-| LightGBM (production artifact) | 3.736 | 4.075 | +359% | 5.345 | 4081 | n/a (too few SKUs) |
-| production routed (hybrid) | 3.736 | 4.075 | +359% | 5.345 | 4081 | n/a (too few SKUs) |
+| LightGBM (production artifact) | 1.351 | 1.687 | +117% | 2.018 | 4081 | +0.907 [+0.743, +1.119] |
+| production routed (hybrid) | 1.351 | 1.687 | +117% | 2.018 | 4081 | +0.907 [+0.743, +1.119] |
 
 _173 SKUs in this class at some origin._
 
@@ -33,12 +33,12 @@ _173 SKUs in this class at some origin._
 
 | Method | WAPE (lead-time sum) | WAPE (daily) | Bias | MASE | Origins | vs strongest baseline (95% CI) |
 |---|---:|---:|---:|---:|---:|---|
-| 7-day moving average | 0.879 | 1.379 | -2% | 1.335 | 447 | reference |
+| 7-day moving average | 0.879 | 1.379 | -2% | 1.335 | 447 | strongest baseline |
 | seasonal naive (7) | 0.879 | 1.563 | -2% | 1.452 | 447 | reference |
 | predict zero | 1.000 | 1.000 | -100% | 1.061 | 447 | reference |
 | Croston-SBA | 1.040 | 1.527 | +22% | 1.417 | 447 | reference |
-| production routed (hybrid) | 1.040 | 1.527 | +22% | 1.417 | 447 | n/a (too few SKUs) |
-| LightGBM (production artifact) | 11.478 | 11.919 | +1135% | 11.177 | 447 | n/a (too few SKUs) |
+| production routed (hybrid) | 1.040 | 1.527 | +22% | 1.417 | 447 | -0.044 [-0.247, +0.240] |
+| LightGBM (production artifact) | 4.627 | 5.307 | +456% | 5.058 | 447 | +3.054 [+1.960, +5.268] |
 
 _28 SKUs in this class at some origin._
 
@@ -46,12 +46,12 @@ _28 SKUs in this class at some origin._
 
 | Method | WAPE (lead-time sum) | WAPE (daily) | Bias | MASE | Origins | vs strongest baseline (95% CI) |
 |---|---:|---:|---:|---:|---:|---|
-| predict zero | 1.000 | 1.000 | -100% | 8.171 | 272 | reference |
+| predict zero | 1.000 | 1.000 | -100% | 8.171 | 272 | strongest baseline |
 | 7-day moving average | 1.227 | 1.322 | -38% | 8.475 | 272 | reference |
 | seasonal naive (7) | 1.227 | 1.467 | -38% | 8.596 | 272 | reference |
-| production routed (hybrid) | 1.828 | 2.216 | +55% | 8.598 | 272 | n/a (too few SKUs) |
+| production routed (hybrid) | 1.828 | 2.216 | +55% | 8.598 | 272 | +0.827 [-0.151, +2.988] |
 | Croston-SBA | 2.067 | 2.437 | +69% | 11.897 | 272 | reference |
-| LightGBM (production artifact) | 16.226 | 17.016 | +1594% | 75.527 | 272 | n/a (too few SKUs) |
+| LightGBM (production artifact) | 7.374 | 8.206 | +697% | 34.806 | 272 | +2.928 [+0.678, +9.700] |
 
 _13 SKUs in this class at some origin._
 
@@ -59,12 +59,12 @@ _13 SKUs in this class at some origin._
 
 | Method | WAPE (lead-time sum) | WAPE (daily) | Bias | MASE | Origins | vs strongest baseline (95% CI) |
 |---|---:|---:|---:|---:|---:|---|
-| Croston-SBA | 0.490 | 0.939 | -0% | 1.290 | 4800 | reference |
+| Croston-SBA | 0.490 | 0.939 | -0% | 1.290 | 4800 | strongest baseline |
 | 7-day moving average | 0.566 | 0.971 | +4% | 1.197 | 4800 | reference |
 | seasonal naive (7) | 0.566 | 1.019 | +4% | 1.258 | 4800 | reference |
 | predict zero | 1.000 | 1.000 | -100% | 1.171 | 4800 | reference |
-| production routed (hybrid) | 3.611 | 3.956 | +342% | 5.097 | 4800 | n/a (too few SKUs) |
-| LightGBM (production artifact) | 4.203 | 4.552 | +405% | 8.596 | 4800 | n/a (too few SKUs) |
+| production routed (hybrid) | 1.347 | 1.689 | +113% | 2.214 | 4800 | +0.868 [+0.716, +1.056] |
+| LightGBM (production artifact) | 1.560 | 1.915 | +138% | 3.567 | 4800 | +1.014 [+0.836, +1.212] |
 
 
 
@@ -78,12 +78,12 @@ Hybrid routing used: {"conservative": 194, "croston": 311, "ml_lightgbm": 2895}
 
 | Method | WAPE (lead-time sum) | WAPE (daily) | Bias | MASE | Origins | vs strongest baseline (95% CI) |
 |---|---:|---:|---:|---:|---:|---|
-| Croston-SBA | 0.387 | 0.910 | +1% | 0.809 | 2895 | reference |
+| Croston-SBA | 0.387 | 0.910 | +1% | 0.809 | 2895 | strongest baseline |
 | 7-day moving average | 0.506 | 0.984 | +12% | 0.877 | 2895 | reference |
 | seasonal naive (7) | 0.506 | 1.051 | +12% | 0.943 | 2895 | reference |
 | predict zero | 1.000 | 1.000 | -100% | 0.866 | 2895 | reference |
-| LightGBM (production artifact) | 5.117 | 5.416 | +494% | 7.103 | 2895 | n/a (too few SKUs) |
-| production routed (hybrid) | 5.117 | 5.416 | +494% | 7.103 | 2895 | n/a (too few SKUs) |
+| LightGBM (production artifact) | 2.083 | 2.385 | +197% | 2.840 | 2895 | +1.696 [+1.381, +2.051] |
+| production routed (hybrid) | 2.083 | 2.385 | +197% | 2.840 | 2895 | +1.696 [+1.381, +2.051] |
 
 _173 SKUs in this class at some origin._
 
@@ -91,12 +91,12 @@ _173 SKUs in this class at some origin._
 
 | Method | WAPE (lead-time sum) | WAPE (daily) | Bias | MASE | Origins | vs strongest baseline (95% CI) |
 |---|---:|---:|---:|---:|---:|---|
-| 7-day moving average | 0.737 | 1.287 | -13% | 1.492 | 311 | reference |
+| 7-day moving average | 0.737 | 1.287 | -13% | 1.492 | 311 | strongest baseline |
 | seasonal naive (7) | 0.737 | 1.438 | -13% | 1.601 | 311 | reference |
 | Croston-SBA | 0.892 | 1.457 | +11% | 1.574 | 311 | reference |
-| production routed (hybrid) | 0.892 | 1.457 | +11% | 1.574 | 311 | n/a (too few SKUs) |
+| production routed (hybrid) | 0.892 | 1.457 | +11% | 1.574 | 311 | -0.014 [-0.204, +0.261] |
 | predict zero | 1.000 | 1.000 | -100% | 1.250 | 311 | reference |
-| LightGBM (production artifact) | 14.429 | 14.790 | +1431% | 16.025 | 311 | n/a (too few SKUs) |
+| LightGBM (production artifact) | 5.392 | 6.049 | +539% | 6.541 | 311 | +3.995 [+2.538, +6.020] |
 
 _26 SKUs in this class at some origin._
 
@@ -104,12 +104,12 @@ _26 SKUs in this class at some origin._
 
 | Method | WAPE (lead-time sum) | WAPE (daily) | Bias | MASE | Origins | vs strongest baseline (95% CI) |
 |---|---:|---:|---:|---:|---:|---|
-| 7-day moving average | 0.932 | 1.114 | -75% | 4.836 | 194 | reference |
+| 7-day moving average | 0.932 | 1.114 | -75% | 4.836 | 194 | strongest baseline |
 | seasonal naive (7) | 0.932 | 1.104 | -75% | 4.804 | 194 | reference |
 | predict zero | 1.000 | 1.000 | -100% | 4.535 | 194 | reference |
-| production routed (hybrid) | 1.628 | 2.061 | +33% | 4.913 | 194 | n/a (too few SKUs) |
+| production routed (hybrid) | 1.628 | 2.061 | +33% | 4.913 | 194 | +0.696 [-0.014, +1.978] |
 | Croston-SBA | 1.932 | 2.517 | +77% | 9.233 | 194 | reference |
-| LightGBM (production artifact) | 19.487 | 20.169 | +1918% | 104.101 | 194 | n/a (too few SKUs) |
+| LightGBM (production artifact) | 7.555 | 8.762 | +754% | 42.276 | 194 | +3.045 [+0.592, +11.887] |
 
 _12 SKUs in this class at some origin._
 
@@ -117,12 +117,12 @@ _12 SKUs in this class at some origin._
 
 | Method | WAPE (lead-time sum) | WAPE (daily) | Bias | MASE | Origins | vs strongest baseline (95% CI) |
 |---|---:|---:|---:|---:|---:|---|
-| Croston-SBA | 0.433 | 0.959 | +3% | 1.228 | 3400 | reference |
+| Croston-SBA | 0.433 | 0.959 | +3% | 1.228 | 3400 | strongest baseline |
 | 7-day moving average | 0.522 | 0.998 | +10% | 1.098 | 3400 | reference |
 | seasonal naive (7) | 0.522 | 1.067 | +10% | 1.163 | 3400 | reference |
 | predict zero | 1.000 | 1.000 | -100% | 1.053 | 3400 | reference |
-| production routed (hybrid) | 4.896 | 5.209 | +468% | 6.499 | 3400 | n/a (too few SKUs) |
-| LightGBM (production artifact) | 5.718 | 6.027 | +554% | 11.936 | 3400 | n/a (too few SKUs) |
+| production routed (hybrid) | 2.030 | 2.345 | +187% | 2.808 | 3400 | +1.613 [+1.323, +1.979] |
+| LightGBM (production artifact) | 2.303 | 2.634 | +219% | 4.812 | 3400 | +1.805 [+1.482, +2.162] |
 
 
 

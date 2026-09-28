@@ -1,40 +1,48 @@
-"""Recursive demand forecasting using trained ML models."""
+"""Recursive multi-step demand forecasting.
+
+``recursive_forecast`` predicts one day, appends that prediction to the
+series, and rebuilds *every* feature for the next day from the extended
+series via ``features.inference_features.feature_vector``. Lags, rolling
+statistics, and calendar features therefore all stay correct and advance with
+the date across the whole horizon — each step sees exactly the feature values
+the model would see if that prediction were a real observation.
+
+Only ``history`` is ever read; nothing after it is used, so a forecast at a
+given origin is identical regardless of what data exists (or doesn't) beyond
+that point. See ``tests/test_recursive_forecast.py`` for the leakage and
+feature-parity proofs.
+"""
+
+from __future__ import annotations
+
+from typing import Any, Sequence
 
 import numpy as np
+import pandas as pd
+
+from features.inference_features import feature_vector
 
 
-def forecast_next_days(model, last_features, horizon=7):
-    """
-    Generates demand forecast for the next N days using a trained model.
+def recursive_forecast(
+    model: Any,
+    history: pd.Series,
+    feature_columns: Sequence[str],
+    horizon: int = 7,
+) -> list[float] | None:
+    """Forecast ``horizon`` days after ``history`` ends, or ``None`` if features can't be built."""
+    columns = list(feature_columns)
+    values = np.nan_to_num(pd.to_numeric(history, errors="coerce").to_numpy(dtype=float), nan=0.0).tolist()
+    if isinstance(history.index, pd.DatetimeIndex) and len(history.index) and not history.index.hasnans:
+        last_date = pd.DatetimeIndex(history.index)[-1]
+    else:
+        last_date = pd.Timestamp.utcnow().normalize()
 
-    Uses recursive forecasting: each prediction feeds back as the next day's
-    lag feature, cascading through all lag columns.
-    """
-    forecasts = []
-    current_features = last_features.copy()
-
-    for _ in range(horizon):
-        pred = max(0, float(model.predict(current_features)[0]))
-        forecasts.append(pred)
-
-        # Cascade lag features: lag_7 <- lag_6 <- ... <- lag_1 <- pred
-        for lag in range(7, 1, -1):
-            col = f"lag_{lag}"
-            prev_col = f"lag_{lag - 1}"
-            if col in current_features.columns and prev_col in current_features.columns:
-                current_features[col] = current_features[prev_col].values
-        if "lag_1" in current_features.columns:
-            current_features["lag_1"] = pred
-
-        # Update rolling statistics from recent predictions
-        if "rolling_mean_7" in current_features.columns:
-            recent = forecasts[-7:] if len(forecasts) >= 7 else forecasts
-            current_features["rolling_mean_7"] = np.mean(recent)
-        if "rolling_std_7" in current_features.columns:
-            recent = forecasts[-7:] if len(forecasts) >= 7 else forecasts
-            current_features["rolling_std_7"] = np.std(recent) if len(recent) > 1 else 0.0
-        if "rolling_mean_14" in current_features.columns:
-            recent_14 = forecasts[-14:] if len(forecasts) >= 14 else forecasts
-            current_features["rolling_mean_14"] = np.mean(recent_14)
-
+    forecasts: list[float] = []
+    for step in range(1, horizon + 1):
+        row = feature_vector(values, last_date + pd.Timedelta(days=step), columns)
+        if row is None:
+            return None
+        prediction = max(0.0, float(model.predict(pd.DataFrame([row], columns=columns))[0]))
+        forecasts.append(prediction)
+        values.append(prediction)
     return forecasts

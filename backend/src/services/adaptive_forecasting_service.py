@@ -4,7 +4,7 @@ import logging
 import pandas as pd
 import numpy as np
 from typing import Any, Dict, List, Tuple, Optional
-from forecasting.forecast_service import forecast_next_days
+from forecasting.forecast_service import recursive_forecast
 from features.inference_features import build_inference_features
 from services.model_routing_service import RoutingDecision, ModelRoutingService
 
@@ -164,6 +164,10 @@ def adaptive_forecast(
         return _result(simple_average_forecast(demand_series, horizon), "simple_average", routing_decision, include_routing)
 
     if selected_method == "ml_lightgbm":
+        # ``last_features`` (a caller-prebuilt single-day row) only tells us
+        # whether day 1 is buildable; recursive_forecast always rebuilds every
+        # step from ``demand_series`` itself, since a correct multi-day
+        # recursion needs the full history, not one static feature row.
         features_df = last_features
         build_failure_reason = None
 
@@ -179,7 +183,9 @@ def adaptive_forecast(
 
         if model is not None and features_df is not None:
             try:
-                forecast = forecast_next_days(model, features_df, horizon)
+                forecast = recursive_forecast(model, demand_series, feature_columns, horizon)
+                if forecast is None:
+                    raise ValueError("recursive_forecast could not build features from demand_series")
                 logger.info(
                     "SKU %s: %s demand -> trained LightGBM model (ml_lightgbm)",
                     sku,

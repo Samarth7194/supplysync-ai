@@ -1,21 +1,81 @@
-"""Build a single-row feature DataFrame for next-day model inference.
+"""Build model feature rows from a demand series, one forecast day at a time.
 
-Mirrors the training pipeline in ``scripts/train_model.py`` so the model sees
-identical preprocessing at inference time: we append a placeholder row for the
-next day, run ``create_lag_features`` + ``create_time_features``, then return
-the last row in the exact column order the model was trained on.
+``feature_vector`` is the single source of truth for what a feature means: it
+computes every column for one target date from the values observed *before*
+that date. ``build_inference_features`` wraps it for the common case (a single
+next-day row from a raw series); ``forecasting.forecast_service.recursive_forecast``
+calls it once per step of a multi-day forecast, extending the series with each
+prediction so lags, rolling stats, and calendar features all stay correct and
+advance with the date across the whole horizon. ``tests/test_recursive_forecast.py``
+asserts this agrees exactly with the vectorised training-time pipeline
+(``features.lag_features`` + ``features.time_features``).
 """
 
-from typing import List, Optional
+from __future__ import annotations
+
+import math
+from typing import List, Optional, Sequence
 
 import numpy as np
 import pandas as pd
 
-from features.lag_features import create_lag_features
-from features.time_features import create_time_features
-
-
 MIN_HISTORY_FOR_INFERENCE = 14  # needed for a non-NaN rolling_mean_14
+
+_NAN = float("nan")
+
+
+def feature_vector(
+    values: Sequence[float] | np.ndarray,
+    target_date: pd.Timestamp,
+    columns: Sequence[str],
+) -> list[float] | None:
+    """Feature values (in ``columns`` order) for ``target_date``, given prior ``values``.
+
+    ``values[-1]`` is the demand on the day before ``target_date``. Returns
+    ``None`` when history is too short for a requested feature, any value is
+    not finite, or a column name isn't recognized.
+    """
+    arr = np.asarray(values, dtype=float)
+    n = arr.size
+    if n < MIN_HISTORY_FOR_INFERENCE:
+        return None
+
+    cache: dict[str, float] = {}
+
+    def compute(name: str) -> float:
+        if name in cache:
+            return cache[name]
+        if name.startswith("lag_"):
+            k = int(name.split("_", 1)[1])
+            value = float(arr[-k]) if n >= k else _NAN
+        elif name == "rolling_mean_7":
+            value = float(arr[-7:].mean()) if n >= 7 else _NAN
+        elif name == "rolling_std_7":
+            value = float(arr[-7:].std(ddof=1)) if n >= 7 else _NAN
+        elif name == "rolling_mean_14":
+            value = float(arr[-14:].mean()) if n >= 14 else _NAN
+        elif name == "day_of_week":
+            value = float(target_date.dayofweek)
+        elif name == "month":
+            value = float(target_date.month)
+        elif name == "is_weekend":
+            value = float(target_date.dayofweek >= 5)
+        elif name == "day_of_month":
+            value = float(target_date.day)
+        elif name == "week_of_year":
+            value = float(target_date.isocalendar().week)
+        else:
+            raise KeyError(f"Unknown feature column: {name!r}")
+        cache[name] = value
+        return value
+
+    try:
+        row = [compute(name) for name in columns]
+    except KeyError:
+        return None
+    if any(not math.isfinite(v) for v in row):
+        return None
+    return row
 
 
 def build_inference_features(
@@ -23,10 +83,10 @@ def build_inference_features(
     feature_columns: List[str],
     end_date: Optional[pd.Timestamp] = None,
 ) -> Optional[pd.DataFrame]:
-    """Return a 1-row DataFrame matching ``feature_columns``, or ``None``.
+    """Return a 1-row DataFrame of next-day features, or ``None``.
 
-    Returns ``None`` when history is too short, required columns cannot be
-    produced, or the resulting row still contains NaNs.
+    Returns ``None`` when history is too short, a column is unrecognized, or
+    the resulting row contains non-finite values.
     """
     if demand_series is None or len(demand_series) < MIN_HISTORY_FOR_INFERENCE:
         return None
@@ -35,30 +95,11 @@ def build_inference_features(
     values = np.nan_to_num(values, nan=0.0)
 
     if isinstance(demand_series.index, pd.DatetimeIndex) and not demand_series.index.hasnans:
-        dates = pd.DatetimeIndex(demand_series.index)
-        anchor = dates[-1]
+        anchor = pd.DatetimeIndex(demand_series.index)[-1]
     else:
         anchor = pd.Timestamp(end_date) if end_date is not None else pd.Timestamp.utcnow().normalize()
-        dates = pd.date_range(end=anchor, periods=len(values), freq="D")
 
-    df = pd.DataFrame({"date": dates, "demand": values})
-
-    # Append one "next-day" row so shifted lag/rolling features align with the
-    # date we're actually predicting for.
-    next_date = anchor + pd.Timedelta(days=1)
-    df = pd.concat(
-        [df, pd.DataFrame({"date": [next_date], "demand": [np.nan]})],
-        ignore_index=True,
-    )
-
-    df = create_lag_features(df, target_col="demand")
-    df = create_time_features(df, date_col="date")
-
-    if any(col not in df.columns for col in feature_columns):
+    row = feature_vector(values, anchor + pd.Timedelta(days=1), feature_columns)
+    if row is None:
         return None
-
-    last_row = df[feature_columns].iloc[[-1]].copy()
-    if last_row.isna().any(axis=1).iloc[0]:
-        return None
-
-    return last_row
+    return pd.DataFrame([row], columns=list(feature_columns))

@@ -33,8 +33,7 @@ from typing import Any, Callable, Iterable, Mapping, Sequence
 import numpy as np
 import pandas as pd
 
-from features.inference_features import build_inference_features
-from forecasting.forecast_service import forecast_next_days
+from forecasting.forecast_service import recursive_forecast
 from services.adaptive_forecasting_service import (
     PRODUCTION_HISTORY_DAYS,
     adaptive_forecast,
@@ -123,17 +122,17 @@ def lightgbm_forecaster(
     model: Any,
     feature_columns: Sequence[str],
     *,
-    recursion: Callable[..., list[float]] = forecast_next_days,
+    recursion: Callable[..., list[float] | None] = recursive_forecast,
 ) -> Forecaster:
     """Forced-LightGBM forecaster using the production feature + recursion code."""
 
     columns = list(feature_columns)
 
     def _forecast(sku: str, history: pd.Series, horizon: int) -> Forecast | None:
-        features = build_inference_features(history, columns)
-        if features is None:
+        forecast = recursion(model, history, columns, horizon)
+        if forecast is None:
             return None
-        return Forecast(tuple(float(v) for v in recursion(model, features, horizon)), LIGHTGBM)
+        return Forecast(tuple(float(v) for v in forecast), LIGHTGBM)
 
     return _forecast
 
