@@ -127,8 +127,11 @@ class CandidateEvaluationService:
         if candidate_metrics is None or active_metrics is None:
             raise CandidateEvaluationError("Candidate and active LightGBM metrics are required.")
 
+        benchmark_metrics = {k: v for k, v in scoped.items() if k not in {CANDIDATE_METHOD, ACTIVE_METHOD}}
         relative = self._relative_wape_improvement(candidate_metrics, active_metrics)
-        eligible, reason = self._promotion_eligibility(candidate_metrics, active_metrics, relative, horizon_days)
+        eligible, reason = self._promotion_eligibility(
+            candidate_metrics, active_metrics, relative, horizon_days, benchmark_metrics
+        )
         if leakage_reason and eligible:
             eligible, reason = False, leakage_reason
 
@@ -137,7 +140,7 @@ class CandidateEvaluationService:
             test_points=int(candidate_metrics.get("n_test_points") or 0),
             candidate_metrics=candidate_metrics,
             active_metrics=active_metrics,
-            benchmark_metrics={k: v for k, v in scoped.items() if k not in {CANDIDATE_METHOD, ACTIVE_METHOD}},
+            benchmark_metrics=benchmark_metrics,
             relative_wape_improvement=relative,
             promotion_eligible=eligible,
             eligibility_reason=reason,
@@ -214,6 +217,7 @@ class CandidateEvaluationService:
         active: dict[str, Any],
         relative_improvement: float | None,
         horizon_days: int,
+        benchmark_metrics: dict[str, dict[str, Any]] | None = None,
     ) -> tuple[bool, str]:
         min_points = int(getattr(getattr(self.settings, "forecasting", None), "routing_min_evaluation_points", 100) or 100)
         min_improvement = float(getattr(getattr(self.settings, "forecasting", None), "routing_min_relative_improvement", 0.05) or 0.05)
@@ -229,6 +233,20 @@ class CandidateEvaluationService:
             return False, f"wape_improvement_below_threshold:{relative_improvement:.4f}<{min_improvement:.4f}"
         if self._bias_materially_worse(candidate.get("bias"), active.get("bias")):
             return False, "candidate_bias_materially_worse"
+        # Beating the active artifact is necessary but not sufficient: an active
+        # model can itself be bad (this project's own history is the proof —
+        # see docs/model-candidates-comparison.md). The candidate must also beat
+        # the strongest reference baseline for this class, not just whatever is
+        # currently deployed.
+        baseline = bt.strongest_baseline(benchmark_metrics or {}, metric=GATE_METRIC)
+        if baseline is not None:
+            baseline_method, baseline_value = baseline
+            candidate_value = candidate.get(GATE_METRIC, candidate.get("wape"))
+            if candidate_value is None or candidate_value > baseline_value:
+                return False, (
+                    f"does_not_beat_strongest_baseline:{baseline_method}={baseline_value:.4f}"
+                    + (f",candidate={candidate_value:.4f}" if candidate_value is not None else "")
+                )
         return True, "candidate_meets_promotion_evidence_gate"
 
     def _horizon_compatible(self, horizon_days: int) -> bool:

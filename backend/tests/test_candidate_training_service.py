@@ -394,6 +394,71 @@ def test_candidate_evaluation_blocks_small_improvement_insufficient_points_worse
     assert active.lifecycle_status == "active"
 
 
+def test_candidate_evaluation_blocks_promotion_when_a_reference_baseline_still_wins():
+    """Beating the active artifact is necessary but not sufficient — the active
+    artifact can itself be bad (this project's own history is the proof: see
+    docs/model-candidates-comparison.md). A candidate must also beat the
+    strongest reference baseline for its class, not just whatever is deployed."""
+    session = _session()
+    service = CandidateEvaluationService(session=session, settings=_settings())
+
+    # Candidate beats active by 30% (well above the 5% threshold), zero bias,
+    # plenty of points — every OTHER gate passes. But croston_sba (0.5) still
+    # beats the candidate (0.7).
+    eligible, reason = service._promotion_eligibility(
+        {"wape": 0.7, "bias": 0.0, "n_test_points": 120},
+        {"wape": 1.0, "bias": 0.0, "n_test_points": 120},
+        0.3,
+        30,
+        {
+            "predict_zero": {"wape_lead_time_sum": 1.0},
+            "moving_avg_7": {"wape_lead_time_sum": 0.8},
+            "seasonal_naive_7": {"wape_lead_time_sum": 0.85},
+            "croston_sba": {"wape_lead_time_sum": 0.5},
+        },
+    )
+
+    assert eligible is False
+    assert reason == "does_not_beat_strongest_baseline:croston_sba=0.5000,candidate=0.7000"
+
+
+def test_candidate_evaluation_allows_promotion_when_candidate_beats_every_baseline():
+    session = _session()
+    service = CandidateEvaluationService(session=session, settings=_settings())
+
+    eligible, reason = service._promotion_eligibility(
+        {"wape": 0.3, "bias": 0.0, "n_test_points": 120},
+        {"wape": 1.0, "bias": 0.0, "n_test_points": 120},
+        0.7,
+        30,
+        {
+            "predict_zero": {"wape_lead_time_sum": 1.0},
+            "moving_avg_7": {"wape_lead_time_sum": 0.8},
+            "seasonal_naive_7": {"wape_lead_time_sum": 0.85},
+            "croston_sba": {"wape_lead_time_sum": 0.5},
+        },
+    )
+
+    assert eligible is True
+    assert reason == "candidate_meets_promotion_evidence_gate"
+
+
+def test_candidate_evaluation_skips_the_baseline_gate_when_no_benchmark_metrics_are_given():
+    """Callers that don't pass benchmark_metrics (e.g. hand-built unit tests) must not
+    be silently blocked by a gate they never supplied data for."""
+    session = _session()
+    service = CandidateEvaluationService(session=session, settings=_settings())
+
+    eligible, reason = service._promotion_eligibility(
+        {"wape": 0.8, "bias": 0.0, "n_test_points": 120},
+        {"wape": 1.0, "bias": 0.0, "n_test_points": 120},
+        0.2,
+        30,
+    )
+
+    assert eligible is True
+    assert reason == "candidate_meets_promotion_evidence_gate"
+
 
 def test_training_pipeline_does_not_replace_global_model_service_cache(tmp_path, monkeypatch):
     import importlib.util
