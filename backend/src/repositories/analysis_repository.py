@@ -110,8 +110,11 @@ def serialize_analysis_runs(rows: Iterable[AnalysisRun]) -> list[dict[str, Any]]
                 "safety_stock": float(row.safety_stock) if row.safety_stock is not None else None,
                 "reorder_point": float(row.reorder_point) if row.reorder_point is not None else None,
                 "inventory_gap": float(row.inventory_gap) if row.inventory_gap is not None else None,
-                "p50": float(row.p50) if row.p50 is not None else None,
-                "p90": float(row.p90) if row.p90 is not None else None,
+                "historical_mean_60d": float(row.historical_mean_60d) if row.historical_mean_60d is not None else None,
+                "historical_p90_60d": float(row.historical_p90_60d) if row.historical_p90_60d is not None else None,
+                # Deprecated aliases — same values as historical_mean_60d/historical_p90_60d above.
+                "p50": float(row.historical_mean_60d) if row.historical_mean_60d is not None else None,
+                "p90": float(row.historical_p90_60d) if row.historical_p90_60d is not None else None,
             }
         )
     return items

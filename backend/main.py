@@ -279,11 +279,16 @@ class StockListResponse(BaseModel):
 
 
 class ForecastBlock(BaseModel):
-    p50: float
-    p90: float
+    historical_mean_60d: float
+    historical_p90_60d: float
     daily: List[float]
     full_horizon_daily: List[float] = Field(default_factory=list)
     horizon_days: int = 7
+    # Deprecated aliases, same values as historical_mean_60d/historical_p90_60d.
+    # p50/p90 were never true forecast percentiles — kept for one release so
+    # existing API consumers don't break; prefer the named fields above.
+    p50: float = 0.0
+    p90: float = 0.0
 
 
 class ModelInfo(BaseModel):

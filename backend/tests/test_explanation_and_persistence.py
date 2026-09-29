@@ -143,9 +143,57 @@ def test_explanation_risk_reason_matches_bucket():
         _cleanup_overrides(backend_main)
 
     assert high["risk"] == "HIGH"
-    assert "p50" in high["explanation"]["risk_reason"].lower()
+    assert "lead-time demand" in high["explanation"]["risk_reason"].lower()
     assert low["risk"] == "LOW"
-    assert "p90" in low["explanation"]["risk_reason"].lower()
+    assert "reorder point" in low["explanation"]["risk_reason"].lower()
+    # LOW risk must never carry a reorder — that's the whole point of the boundary.
+    assert low["recommended_order"] == 0
+    assert low["action"] == "NO_ACTION"
+
+
+def test_risk_boundaries_match_the_decision_exactly():
+    """Risk must be derived from lead_time_demand/reorder_point themselves, not a
+    separate statistic — so probing stock right at each boundary must flip the
+    bucket at exactly that point, and LOW must never carry a reorder, for any
+    demand shape (regular, intermittent, highly intermittent)."""
+    session = _session()
+    data_service = _StubDataService({
+        "REG": _regular_series(level=30.0),
+        "SPARSE": _highly_intermittent_series(),
+    })
+    backend_main, client = _client_with_analysis_service(session, data_service)
+    try:
+        for sku in ("REG", "SPARSE"):
+            # A throwaway probe just to read the real lead_time_demand/reorder_point
+            # this SKU's own decision produces — no hand-computed expectations.
+            probe = client.post("/api/analyze", json={"sku": sku, "current_stock": 0}).json()
+            lead_time_demand = probe["decision"]["lead_time_demand"]
+            reorder_point = probe["decision"]["reorder_point"]
+            assert reorder_point >= lead_time_demand  # safety stock is never negative
+
+            below_ltd = client.post("/api/analyze", json={"sku": sku, "current_stock": max(0.0, lead_time_demand - 1)}).json()
+            at_ltd = client.post("/api/analyze", json={"sku": sku, "current_stock": lead_time_demand}).json()
+            below_rop = client.post("/api/analyze", json={"sku": sku, "current_stock": max(lead_time_demand, reorder_point - 1)}).json()
+            at_rop = client.post("/api/analyze", json={"sku": sku, "current_stock": reorder_point}).json()
+            above_rop = client.post("/api/analyze", json={"sku": sku, "current_stock": reorder_point + 1000}).json()
+
+            if lead_time_demand > 0:
+                assert below_ltd["risk"] == "HIGH", sku
+            assert at_ltd["risk"] in {"MEDIUM", "LOW"}, sku  # AT lead-time demand is no longer HIGH
+            if reorder_point > lead_time_demand:
+                assert below_rop["risk"] == "MEDIUM", sku
+            assert at_rop["risk"] == "LOW", sku
+            assert above_rop["risk"] == "LOW", sku
+
+            # The actual invariant: LOW risk never carries a reorder, for either SKU shape.
+            for response in (at_rop, above_rop):
+                assert response["recommended_order"] == 0, sku
+                assert response["action"] == "NO_ACTION", sku
+            if at_ltd["risk"] == "LOW":
+                assert at_ltd["recommended_order"] == 0, sku
+    finally:
+        client.close()
+        _cleanup_overrides(backend_main)
 
 
 def test_recent_analyses_endpoint_returns_what_was_written():

@@ -389,8 +389,8 @@ def _analysis_values(sku_id: int, sku_code: str, *, current_stock: str, routing_
         "safety_stock_method": "traditional",
         "reorder_point": Decimal("80"),
         "inventory_gap": Decimal("75"),
-        "p50": Decimal("10"),
-        "p90": Decimal("15"),
+        "historical_mean_60d": Decimal("10"),
+        "historical_p90_60d": Decimal("15"),
         "forecast_daily": [10.0] * 7,
         "explanation": {"method_reason": "test"},
     }
@@ -419,8 +419,8 @@ def _prediction_values(
         "model_artifact_id": model_artifact_id,
         "input_history_length": 60,
         "forecast_horizon_days": 7,
-        "p50": Decimal("10"),
-        "p90": Decimal("15"),
+        "historical_mean_60d": Decimal("10"),
+        "historical_p90_60d": Decimal("15"),
         "forecast_daily": [10.0] * 7,
         "recommended_order_quantity": 10,
     }

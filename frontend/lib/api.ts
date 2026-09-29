@@ -93,6 +93,10 @@ export interface SkuAnalysis {
   risk: "HIGH" | "MEDIUM" | "LOW";
   risk_color: string;
   forecast: {
+    historical_mean_60d: number;
+    historical_p90_60d: number;
+    // Deprecated aliases, same values as historical_mean_60d/historical_p90_60d.
+    // p50/p90 were never true forecast percentiles; kept for one release.
     p50: number;
     p90: number;
     daily: number[];
@@ -133,6 +137,9 @@ export interface RecentAnalysis {
   safety_stock: number | null;
   reorder_point: number | null;
   inventory_gap: number | null;
+  historical_mean_60d: number | null;
+  historical_p90_60d: number | null;
+  // Deprecated aliases, same values as historical_mean_60d/historical_p90_60d.
   p50: number | null;
   p90: number | null;
 }

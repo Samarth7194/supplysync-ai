@@ -132,8 +132,10 @@ class AnalysisRun(Base):
     safety_stock_method: Mapped[str | None] = mapped_column(String(32))
     reorder_point: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
     inventory_gap: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
-    p50: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
-    p90: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
+    # Renamed from p50/p90: both are historical descriptive statistics (a mean
+    # and a percentile of recorded demand), never true forecast percentiles.
+    historical_mean_60d: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
+    historical_p90_60d: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
     forecast_daily: Mapped[list[float] | None] = mapped_column(JSON)
     explanation: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False, server_default=func.now(), index=True)
@@ -168,8 +170,8 @@ class PredictionLog(Base):
     model_artifact_id: Mapped[int | None] = mapped_column(ForeignKey("model_artifacts.id"), index=True)
     input_history_length: Mapped[int] = mapped_column(Integer, nullable=False)
     forecast_horizon_days: Mapped[int] = mapped_column(Integer, nullable=False)
-    p50: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
-    p90: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
+    historical_mean_60d: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
+    historical_p90_60d: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))
     forecast_daily: Mapped[list[float] | None] = mapped_column(JSON)
     recommended_order_quantity: Mapped[int] = mapped_column(Integer, nullable=False)
     actual_observed_demand: Mapped[Decimal | None] = mapped_column(Numeric(14, 3))

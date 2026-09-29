@@ -115,6 +115,23 @@ def test_analyze_exposes_routing_block_not_stripped_from_the_response():
         assert isinstance(routing["fallback_used"], bool)
 
 
+def test_analyze_forecast_block_keeps_p50_p90_as_deprecated_aliases():
+    """historical_mean_60d/historical_p90_60d are the real names (p50/p90 were
+    never true percentiles); p50/p90 stay in the response for one release,
+    with identical values, so existing consumers don't break."""
+    import main as backend_main
+
+    with TestClient(backend_main.app) as c:
+        backend_main._data_service = _StubDataService({"HAS": _regular_series()})
+        body = c.post("/api/analyze", json={"sku": "HAS", "current_stock": 10}).json()
+
+    forecast = body["forecast"]
+    assert "historical_mean_60d" in forecast
+    assert "historical_p90_60d" in forecast
+    assert forecast["p50"] == forecast["historical_mean_60d"]
+    assert forecast["p90"] == forecast["historical_p90_60d"]
+
+
 def test_inventory_gap_matches_reorder_point_minus_stock():
     import main as backend_main
 

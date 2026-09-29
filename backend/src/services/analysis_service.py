@@ -46,11 +46,17 @@ class AnalysisExecutionError(AnalysisServiceError):
 
 @dataclass(frozen=True)
 class ForecastBlockData:
-    p50: float
-    p90: float
+    historical_mean_60d: float
+    historical_p90_60d: float
     daily: list[float]
     full_horizon_daily: list[float]
     horizon_days: int
+    # Deprecated aliases, same values as historical_mean_60d/historical_p90_60d.
+    # p50/p90 were never true percentiles — p50 is the 60-day historical mean,
+    # p90 the 60-day historical 90th percentile. Kept for one release so
+    # existing API consumers don't break; prefer the named fields above.
+    p50: float = 0.0
+    p90: float = 0.0
 
 
 @dataclass(frozen=True)
@@ -246,15 +252,8 @@ class AnalysisService:
         decision: dict[str, Any],
     ) -> AnalyzeResult:
         demand_values = demand_series.to_numpy(dtype=float)
-        p50 = float(np.mean(demand_values))
-        p90 = float(np.percentile(demand_values, 90))
-
-        if request.current_stock < p50:
-            risk, risk_color = "HIGH", "#ef4444"
-        elif request.current_stock < p90:
-            risk, risk_color = "MEDIUM", "#eab308"
-        else:
-            risk, risk_color = "LOW", "#22c55e"
+        historical_mean_60d = float(np.mean(demand_values))
+        historical_p90_60d = float(np.percentile(demand_values, 90))
 
         order_qty = int(decision.get("order_quantity", 0))
         forecast_method = decision.get("intelligence", {}).get("forecast_method", "unknown")
@@ -265,6 +264,21 @@ class AnalysisService:
         safety_stock_method = str(decision.get("safety_stock_method", "traditional"))
         reorder_point = float(decision.get("reorder_point", 0.0))
         service_level = float(decision.get("service_level", 0.95))
+
+        # Risk reflects the decision itself, not a separate statistic: HIGH
+        # means current stock won't even cover lead-time demand, MEDIUM means
+        # it covers lead-time demand but not the safety-stock-padded reorder
+        # point, LOW means stock already meets or exceeds the reorder point —
+        # which is exactly the condition under which raw_order (and therefore
+        # every downstream constrained order quantity) is zero. A LOW-risk SKU
+        # can never receive a reorder; see test_risk_low_implies_no_reorder.
+        current_stock = float(request.current_stock)
+        if current_stock < lead_time_demand:
+            risk, risk_color = "HIGH", "#ef4444"
+        elif current_stock < reorder_point:
+            risk, risk_color = "MEDIUM", "#eab308"
+        else:
+            risk, risk_color = "LOW", "#22c55e"
         lead_time_days = int(decision.get("lead_time_days", 7))
         daily_forecast = self._daily_forecast(decision)
         full_horizon_forecast = self._full_horizon_forecast(decision, lead_time_days)
@@ -304,9 +318,10 @@ class AnalysisService:
             forecast_source=forecast_source,
             demand_source=demand_source,
             risk=risk,
-            p50=p50,
-            p90=p90,
-            current_stock=float(request.current_stock),
+            lead_time_demand=lead_time_demand,
+            reorder_point=reorder_point,
+            lead_time_days=lead_time_days,
+            current_stock=current_stock,
             routing=routing,
         )
 
@@ -315,8 +330,10 @@ class AnalysisService:
             risk=risk,
             risk_color=risk_color,
             forecast=ForecastBlockData(
-                p50=round(p50, 1),
-                p90=round(p90, 1),
+                historical_mean_60d=round(historical_mean_60d, 1),
+                historical_p90_60d=round(historical_p90_60d, 1),
+                p50=round(historical_mean_60d, 1),
+                p90=round(historical_p90_60d, 1),
                 daily=daily_forecast,
                 full_horizon_daily=full_horizon_forecast,
                 horizon_days=lead_time_days,
@@ -465,8 +482,9 @@ class AnalysisService:
         forecast_source: str,
         demand_source: str,
         risk: str,
-        p50: float,
-        p90: float,
+        lead_time_demand: float,
+        reorder_point: float,
+        lead_time_days: int,
         current_stock: float,
         routing: dict[str, Any] | None = None,
     ) -> ExplanationBlockData:
@@ -526,18 +544,19 @@ class AnalysisService:
 
         if risk == "HIGH":
             risk_reason = (
-                f"Current stock ({current_stock:g}) is below the P50 demand estimate "
-                f"({p50:g}) - any higher-than-median day risks a stockout."
+                f"Current stock ({current_stock:g}) is below the {lead_time_days}-day lead-time "
+                f"demand ({lead_time_demand:g}) - a stockout is likely before the next delivery arrives."
             )
         elif risk == "MEDIUM":
             risk_reason = (
-                f"Current stock ({current_stock:g}) covers median demand ({p50:g}) but not "
-                f"the P90 scenario ({p90:g}) - a higher-demand day could cause a stockout."
+                f"Current stock ({current_stock:g}) covers the {lead_time_days}-day lead-time demand "
+                f"({lead_time_demand:g}) but not the reorder point ({reorder_point:g}, which includes "
+                "safety stock) - a higher-than-expected demand day could still cause a stockout."
             )
         else:
             risk_reason = (
-                f"Current stock ({current_stock:g}) covers the P90 demand scenario "
-                f"({p90:g}), so even a higher-demand day should be fulfillable."
+                f"Current stock ({current_stock:g}) meets or exceeds the reorder point "
+                f"({reorder_point:g}), so no reorder is needed right now."
             )
 
         if demand_source == "synthetic":
@@ -662,8 +681,8 @@ class AnalysisService:
             "safety_stock_method": result.decision.safety_stock_method,
             "reorder_point": Decimal(str(result.decision.reorder_point)),
             "inventory_gap": Decimal(str(result.decision.inventory_gap)),
-            "p50": Decimal(str(result.forecast.p50)),
-            "p90": Decimal(str(result.forecast.p90)),
+            "historical_mean_60d": Decimal(str(result.forecast.historical_mean_60d)),
+            "historical_p90_60d": Decimal(str(result.forecast.historical_p90_60d)),
             "forecast_daily": result.forecast.full_horizon_daily,
             "explanation": asdict(result.explanation),
         }
@@ -692,8 +711,8 @@ class AnalysisService:
             "model_artifact_id": model_artifact_id,
             "input_history_length": int(len(demand_series)),
             "forecast_horizon_days": result.decision.lead_time_days,
-            "p50": Decimal(str(result.forecast.p50)),
-            "p90": Decimal(str(result.forecast.p90)),
+            "historical_mean_60d": Decimal(str(result.forecast.historical_mean_60d)),
+            "historical_p90_60d": Decimal(str(result.forecast.historical_p90_60d)),
             "forecast_daily": result.forecast.full_horizon_daily,
             "recommended_order_quantity": result.recommended_order,
         }

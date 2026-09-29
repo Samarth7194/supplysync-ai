@@ -72,8 +72,8 @@ interface Analysis {
   risk: string;
   risk_color: string;
   forecast: {
-    p50: number;
-    p90: number;
+    historical_mean_60d: number;
+    historical_p90_60d: number;
     daily?: number[];
     full_horizon_daily?: number[];
     horizon_days?: number;
@@ -630,11 +630,11 @@ export default function SKUDetail() {
                       <span className="w-2 h-2 rounded-sm bg-blue-500" />
                       <span className="text-gray-300">Actual units sold</span>
                     </span>
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className="w-3 border-t border-dashed border-green-500" /> Historical avg
+                    <span className="inline-flex items-center gap-1.5" title="Mean of the last 60 recorded days — a wider window than the 30 days of bars shown here">
+                      <span className="w-3 border-t border-dashed border-green-500" /> 60-day avg
                     </span>
-                    <span className="inline-flex items-center gap-1.5">
-                      <span className="w-3 border-t border-dashed border-red-500" /> Historical P90
+                    <span className="inline-flex items-center gap-1.5" title="90th percentile of the last 60 recorded days — a wider window than the 30 days of bars shown here">
+                      <span className="w-3 border-t border-dashed border-red-500" /> 60-day P90
                     </span>
                     <span className="inline-flex items-center gap-1.5">
                       <span className="w-3 h-px bg-yellow-500" /> Current stock
@@ -667,22 +667,22 @@ export default function SKUDetail() {
                     />
                     <Bar dataKey="demand" name="Actual units sold" fill="#3b82f6" radius={[4, 4, 0, 0]} />
                     <ReferenceLine
-                      y={analysis.forecast.p50}
+                      y={analysis.forecast.historical_mean_60d}
                       stroke="#22c55e"
                       strokeDasharray="6 3"
                       label={{
-                        value: formatNumber(analysis.forecast.p50, { maximumFractionDigits: 1 }),
+                        value: formatNumber(analysis.forecast.historical_mean_60d, { maximumFractionDigits: 1 }),
                         position: "right",
                         fill: "#22c55e",
                         fontSize: 11,
                       }}
                     />
                     <ReferenceLine
-                      y={analysis.forecast.p90}
+                      y={analysis.forecast.historical_p90_60d}
                       stroke="#ef4444"
                       strokeDasharray="6 3"
                       label={{
-                        value: formatNumber(analysis.forecast.p90, { maximumFractionDigits: 1 }),
+                        value: formatNumber(analysis.forecast.historical_p90_60d, { maximumFractionDigits: 1 }),
                         position: "right",
                         fill: "#ef4444",
                         fontSize: 11,
@@ -882,30 +882,36 @@ export default function SKUDetail() {
                     <p className="text-2xl font-bold tabular-nums mt-1">{formatNumber(stock)}</p>
                   </div>
                   <div>
-                    <p className="text-[11px] text-gray-500 uppercase tracking-wider">
-                      Historical avg
+                    <p
+                      className="text-[11px] text-gray-500 uppercase tracking-wider"
+                      title="Mean of the last 60 recorded days of demand."
+                    >
+                      60-day avg
                     </p>
                     <p className="text-2xl font-bold text-green-400 tabular-nums mt-1">
-                      {formatNumber(analysis.forecast.p50, { maximumFractionDigits: 1 })}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-[11px] text-gray-500 uppercase tracking-wider">
-                      Historical P90
-                    </p>
-                    <p className="text-2xl font-bold text-red-400 tabular-nums mt-1">
-                      {formatNumber(analysis.forecast.p90, { maximumFractionDigits: 1 })}
+                      {formatNumber(analysis.forecast.historical_mean_60d, { maximumFractionDigits: 1 })}
                     </p>
                   </div>
                   <div>
                     <p
                       className="text-[11px] text-gray-500 uppercase tracking-wider"
-                      title="How much current stock undershoots the P90 demand scenario."
+                      title="90th percentile of the last 60 recorded days of demand."
                     >
-                      Shortfall vs P90
+                      60-day P90
+                    </p>
+                    <p className="text-2xl font-bold text-red-400 tabular-nums mt-1">
+                      {formatNumber(analysis.forecast.historical_p90_60d, { maximumFractionDigits: 1 })}
+                    </p>
+                  </div>
+                  <div>
+                    <p
+                      className="text-[11px] text-gray-500 uppercase tracking-wider"
+                      title="How much current stock undershoots the 60-day P90 demand scenario."
+                    >
+                      Shortfall vs 60-day P90
                     </p>
                     <p className="text-2xl font-bold text-yellow-400 tabular-nums mt-1">
-                      {formatNumber(Math.max(0, Math.round(analysis.forecast.p90 - stock)))}
+                      {formatNumber(Math.max(0, Math.round(analysis.forecast.historical_p90_60d - stock)))}
                     </p>
                   </div>
                 </div>
