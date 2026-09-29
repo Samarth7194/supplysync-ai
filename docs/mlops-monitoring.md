@@ -440,8 +440,10 @@ predictions that can never resolve.
 
 ```text
 1. Offline Backtest        (scripts/evaluate_forecast.py, forecast_evaluation.json)
-   One-step-ahead backtest with real actuals fed back each step. Powers the
-   dashboard's "Backtest Performance" KPIs and the routing/monitoring
+   Rolling-origin, multi-step backtest (src/evaluation/backtest.py): at each
+   origin it forecasts the whole horizon at once, with no actuals fed back
+   mid-horizon, scored against what really followed. Powers the dashboard's
+   "Backtest Performance" KPIs and the evidence-based routing/monitoring
    baseline WAPE. Not a replay of the monitoring lifecycle itself.
 
 2. Historical Monitoring Replay   (this section)

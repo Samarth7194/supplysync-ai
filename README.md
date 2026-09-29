@@ -19,12 +19,12 @@ The deployed demo runs on a historical retail transaction dataset — there is n
 
 ## Highlights
 
-- **~4,900 SKUs**, **531K+ daily-demand records** (2009-12-01 → 2011-12-09) from the UCI Online Retail II dataset
-- **Hybrid forecasting** — regular demand → LightGBM (15-feature schema); intermittent → Croston-SBA; highly intermittent → a conservative buffer
+- **~4,900 SKUs**, **531K+ daily-demand records** (2009-12-01 → 2011-12-09) in the UCI Online Retail II dataset — the live demo serves the top 20 by volume, not the whole dataset
+- **Evidence-based hybrid routing** — a multi-step, rolling-origin backtest (not a one-step-ahead evaluation) decides per demand class whether LightGBM, Croston-SBA, or a conservative buffer actually wins; a method is only routed to if it beats every reference baseline, not just the legacy default. With the currently-committed evidence this routes regular-demand SKUs to **Croston-SBA**, not LightGBM — see [What I Found and Changed](#what-i-found-and-changed)
 - **Uncertainty-aware safety stock** — rolling residual sigma when evidence exists, Z-score × σ × √lead-time otherwise
-- **Controlled MLOps lifecycle** — prediction logging → evaluation → monitoring → degradation detection → retraining recommendation → candidate training/evaluation → human-approved promotion → rollback, with a full audit trail
+- **Controlled MLOps lifecycle** — prediction logging → evaluation → monitoring → degradation detection → retraining recommendation → candidate training/evaluation → human-approved promotion → rollback, with a full audit trail; promotion now requires a candidate to beat the strongest baseline, not just the currently-active artifact
 - **Historical Monitoring Replay** — demonstrates the monitoring pipeline honestly against held-out historical data instead of fabricating live telemetry
-- **280 backend tests** (pytest) + **35 frontend tests** (typecheck + lint clean) + PostgreSQL integration tests, all in CI
+- **366 backend tests** (pytest) + **38 frontend tests** (typecheck + lint clean) + PostgreSQL integration tests, all in CI
 - **Deployed full-stack**: Next.js on Vercel, FastAPI on Render, PostgreSQL on Neon
 
 ---
@@ -82,11 +82,13 @@ SKU history flows in from the processed dataset (or the caller), gets classified
 
 ### Demand → forecast method
 
-| Demand Pattern | Forecast Method | Why |
+| Demand Pattern | Legacy Default | Why the default exists |
 |---|---|---|
 | Regular | **LightGBM** | Enough non-zero signal to learn lag/rolling/calendar relationships |
 | Intermittent | **Croston-SBA** | Designed for sparse, non-zero demand; avoids the bias plain averaging introduces on gaps |
 | Highly intermittent | **Conservative buffer** | Too little signal for ML to be trustworthy — a bounded buffer avoids overconfident forecasts |
+
+These are the *legacy* per-pattern defaults, still used as the fallback when evidence is missing, stale, or too small a sample. With evidence-based routing (on by default), the router only switches away from a class's default when a method beats every reference baseline (predict-zero, 7-day moving average, seasonal-naive, Croston-SBA) in the backtest — not just the current default. With the evidence currently committed in this repo, that means **regular-demand SKUs actually route to Croston-SBA**, because LightGBM's own multi-step backtest WAPE (1.351) is worse than Croston-SBA's (0.444) — see [What I Found and Changed](#what-i-found-and-changed).
 
 ### From forecast to reorder decision
 
@@ -138,7 +140,7 @@ These three method rows come from **different SKU populations** selected by the 
 
 | | Used for | Source |
 |---|---|---|
-| **Offline Backtest** | Model comparison, inventory KPI simulation | `scripts/evaluate_forecast.py`, one-step-ahead temporal holdout |
+| **Offline Backtest** | Model comparison, evidence-based routing | `scripts/evaluate_forecast.py`, multi-step rolling-origin (`src/evaluation/backtest.py`) |
 | **Historical Monitoring Replay** | Demonstrating the monitoring lifecycle end-to-end | Held-out historical windows, described above |
 | **Live Production Monitoring** | Real production forecast-performance tracking | Requires new predictions **and** subsequently-arriving real demand — not currently connected |
 
@@ -173,23 +175,24 @@ graph TD
 
 ## Evaluation
 
-**Offline backtest** (`scripts/evaluate_forecast.py`, 20 SKUs, 600 test points, 30-day temporal holdout):
+**Offline backtest** (`scripts/evaluate_forecast.py`, multi-step rolling-origin, 200 SKUs, 4,800 forecast origins, H=7 days, all classes pooled — full per-class tables in [docs/forecast-evaluation.md](docs/forecast-evaluation.md)):
 
-| Model | MAE | RMSE | Bias | WAPE | MASE |
-|---|---:|---:|---:|---:|---:|
-| naive_last | 109.92 | 175.12 | 5.82 | 1.19 | 0.97 |
-| seasonal_naive_7 | 92.80 | 166.21 | 5.59 | 1.00 | 0.82 |
-| moving_avg_7 | 86.40 | 129.38 | 2.25 | 0.93 | 0.76 |
-| **croston_sba** | **80.41** | **125.88** | −1.46 | **0.87** | **0.71** |
-| lightgbm | 91.67 | 143.58 | 26.06 | 0.99 | 0.83 |
+| Method | WAPE (lead-time sum) | Bias | MASE |
+|---|---:|---:|---:|
+| **Croston-SBA** | **0.490** | −0% | 1.290 |
+| 7-day moving average | 0.566 | +4% | 1.197 |
+| seasonal naive (7) | 0.566 | +4% | 1.258 |
+| predict zero | 1.000 | −100% | 1.171 |
+| production routed (today's live hybrid policy) | 1.347 | +113% | 2.214 |
+| LightGBM (production artifact) | 1.560 | +138% | 3.567 |
 
-Sparse, intermittent retail demand is genuinely hard to forecast — a WAPE near or above 1.0 is common on this kind of data, not a sign of a broken model. Croston-SBA beats LightGBM in aggregate here, and that's the *reason the hybrid architecture exists*: on intermittent SKUs, LightGBM's bias turns strongly positive (systematic over-forecasting), so the live router never sends intermittent or highly-intermittent SKUs through it. No single method dominates every demand pattern on real retail data, so the system doesn't pretend one does — it evaluates evidence per pattern and routes accordingly. Full per-class breakdown in [docs/forecast-error-analysis.md](docs/forecast-error-analysis.md).
+LightGBM does not win here, including on the regular-demand class it's scoped to (0.444 for Croston-SBA vs. 1.351 for LightGBM at H=7 — see [docs/forecast-evaluation.md](docs/forecast-evaluation.md)). That's not hidden or tuned away: evidence-based routing reads this exact evidence and, per its own gate (a method is only selected if it beats every reference baseline, not just the legacy default), now sends regular-demand SKUs to Croston-SBA instead. LightGBM candidates retrained with wider data and SKU-profile features close most of the gap (WAPE 0.489 with a tweedie objective) but still don't beat Croston-SBA on this class — see [docs/model-candidates-comparison.md](docs/model-candidates-comparison.md). No single method dominates every demand pattern on real retail data, so the system doesn't pretend one does — it evaluates evidence per pattern and routes accordingly, even when the result isn't flattering to the ML path.
 
-**Historical Monitoring Replay** (7-day horizon, held-out historical windows) is summarized above — it exercises the live routing/forecasting code, not the offline backtest's one-step-ahead methodology, so its numbers are not directly comparable to the table above even though both report WAPE.
+**Historical Monitoring Replay** (7-day horizon, held-out historical windows) is summarized above — it exercises the live routing/forecasting code against already-recorded history, which is a different evaluation surface than the offline backtest above, so its numbers are not directly comparable even though both report WAPE.
 
 Reproduce the offline backtest:
 ```bash
-cd backend && python scripts/evaluate_forecast.py
+cd backend && python scripts/evaluate_forecast.py --horizons 7,14 --max-skus 200
 ```
 
 ---
@@ -218,7 +221,7 @@ Real captures from the deployed app (Vercel frontend + Render backend), not mock
 backend/
   src/         # services, repositories, forecasting, inventory, evaluation, MLOps logic
   scripts/     # operator CLIs — train, evaluate, promote, rollback, monitor, replay
-  tests/       # 280+ pytest cases
+  tests/       # 360+ pytest cases
   data/        # cached KPIs, offline evaluation artifacts, historical replay output
 frontend/
   app/         # Next.js App Router pages
@@ -252,7 +255,7 @@ python scripts/check_setup.py     # shows what's present vs. missing
 python scripts/bootstrap.py       # trains LightGBM, builds the parquet, computes KPIs (idempotent)
 
 python -m alembic upgrade head    # applies the PostgreSQL schema (safe on SQLite too, for local dev)
-python -m pytest tests/ -q        # 280 passed, 8 skipped
+python -m pytest tests/ -q        # 366 passed, 8 skipped
 
 uvicorn main:app --reload --port 8000
 ```
@@ -300,8 +303,8 @@ Never commit real values for `SESSION_SECRET`, `DATABASE_URL`, or `API_KEY` — 
 
 | Check | Command | Result |
 |---|---|---|
-| Backend tests | `cd backend && python -m pytest tests/ -q` | 280 passed, 8 skipped |
-| Frontend tests | `cd frontend && npm test` | 35 passed, typecheck clean, lint clean |
+| Backend tests | `cd backend && python -m pytest tests/ -q` | 366 passed, 8 skipped |
+| Frontend tests | `cd frontend && npm test` | 38 passed, typecheck clean, lint clean |
 | Frontend build | `cd frontend && npm run build` | Passes |
 | Alembic | `cd backend && python -m alembic heads` | Single head |
 | CI | [`.github/workflows/test.yml`](.github/workflows/test.yml) | backend-tests, frontend-checks, postgres-integration on every push/PR to `main` |
@@ -314,7 +317,8 @@ CI additionally validates the full Alembic migration chain (`upgrade head` → `
 
 - The demo dataset is historical and frozen (2009-12-01 → 2011-12-09); there is no live ERP/POS integration.
 - Live production monitoring cannot accumulate genuinely new evidence without a live actual-demand feed — see [Historical Monitoring Replay](#model-monitoring--historical-replay) for how the project demonstrates the pipeline anyway, and note that replay is explicitly not live evidence.
-- Recursive multi-step LightGBM forecasting does not currently advance future calendar features (day-of-week, month, etc.) correctly during the recursive horizon — a known, deferred limitation, not silently patched.
+- **The KPI simulation currently shows the intelligent policy costing *more* than the naive baseline**, not less — see [What I Found and Changed](#what-i-found-and-changed). This is the real output of `scripts/compute_kpis.py`, kept as computed rather than tuned to look better.
+- LightGBM does not win the backtest on the regular-demand class it's scoped to; evidence-based routing now sends that class to Croston-SBA instead (see [Evaluation](#evaluation)).
 - Monitoring detects forecast-performance degradation (WAPE/bias drift); it does not perform feature- or input-distribution drift detection.
 - Automatic retraining and automatic promotion are both intentionally disabled — every model lifecycle change requires an explicit operator command.
 - The production deployment assumes a single backend worker; multi-worker runtime synchronization after a promotion is not implemented (a restart/redeploy is required to pick up a newly-promoted artifact).
@@ -323,11 +327,27 @@ CI additionally validates the full Alembic migration chain (`upgrade head` → `
 
 - Incremental/live demand ingestion from a real ERP or POS system.
 - A proper connector layer instead of the current CSV/parquet pipeline.
-- Correct future-calendar-feature progression in recursive LightGBM forecasting.
+- Close the remaining regular-demand gap: even the best retrained LightGBM candidate (tweedie objective, wider training data, SKU-profile features) doesn't beat Croston-SBA on that class yet — see [docs/model-candidates-comparison.md](docs/model-candidates-comparison.md).
+- Investigate why the KPI simulation's intelligent policy underperforms the naive baseline at the current cost assumptions, and whether a different safety-stock or routing choice changes that.
 - Feature- and input-distribution drift detection alongside the existing performance monitoring.
 - Probabilistic forecasting (quantile regression or conformal intervals) beyond the current residual-based uncertainty approximation.
 - Distributed/multi-worker model synchronization after promotion.
 - Broader offline benchmarking against additional model families.
+
+---
+
+## What I Found and Changed
+
+This project went through an internal audit that found the original evaluation, forecasting, and simulation code were each quietly flattering the system. Nothing here was hidden after the fact — the fixes and the resulting (sometimes unflattering) numbers are all in the commit history on this branch.
+
+1. **The original evaluation methodology was one-step-ahead with actuals fed back**, not a real multi-day forecast test — it measured "can the model predict tomorrow given today's true value," while the app's own reorder logic consumes a whole lead-time horizon forecast. Replaced with a shared, rolling-origin, multi-step backtest (`src/evaluation/backtest.py`) that calls the exact same production forecast path, used by evaluation scripts, monitoring, candidate promotion, and routing alike — one methodology, not three copy-pasted ones.
+2. **The recursive LightGBM forecast had a real bug**: each step forward mutated a single static feature row instead of rebuilding lag/rolling/calendar features from the extended series, so calendar features froze and `rolling_std` collapsed to zero after one step. Fixed by rebuilding every feature at each recursive step. Before/after on the corrected backtest (H=7, lead-time-sum WAPE): regular 3.736 → 1.351, intermittent 11.478 → 4.627, highly-intermittent 11.500 → 7.374 — a large improvement, but not enough to make LightGBM competitive on the regular class (see next point).
+3. **Once evaluation and recursion were both honest, LightGBM turned out not to win** on the demand class it's actually scoped to: Croston-SBA beats it by a wide margin (0.444 vs. 1.351 WAPE at H=7) on regular-demand SKUs, even after retraining LightGBM on 2,545 SKUs with SKU-profile features and a tweedie objective (best result: 0.489, still short of Croston-SBA). This is reported, not hidden — see [docs/model-candidates-comparison.md](docs/model-candidates-comparison.md).
+4. **Evidence-based routing was rebuilt to consume that corrected evidence** and to require a method to beat every reference baseline (not just the legacy per-pattern default) before it's selected — and turned on by default. The direct consequence: regular-demand SKUs now route to Croston-SBA in production, not LightGBM.
+5. **The promotion gate had the same blind spot**: a candidate only had to beat the currently-active artifact, not the best available method. It now must beat the strongest baseline too.
+6. **`p50`/`p90` were never true forecast percentiles** — they were a 60-day historical mean and a 60-day historical 90th-percentile, labeled like model output. Renamed to `historical_mean_60d`/`historical_p90_60d` throughout the API, database, and UI (old names kept for one release as deprecated aliases). Risk is now classified directly from the decision (HIGH if stock < lead-time demand, MEDIUM if < reorder point, LOW otherwise), with a test asserting a LOW-risk SKU can never receive a nonzero reorder.
+7. **The KPI/ROI simulation was running against `IntelligentInventoryService(model=None)`** — it silently fell back to a moving average for every SKU instead of loading the trained model, tracked on-hand inventory only (ignoring stock already on order, so policies over-ordered), had no warm-up period, and only simulated 10 SKUs against a single weak baseline. Fixed: the real model and evidence-based routing are now wired in, policies decide off inventory *position* (on-hand + on-order), a 14-day warm-up period is excluded from every metric, 50 SKUs are simulated over 90 measured days against two baselines (naive fixed-threshold and a new moving-average reorder-point policy), and sensitivity to the stockout:holding cost ratio is reported. **The honest result is worse, not better**: the intelligent policy now costs *more* than the naive baseline (-9.0% aggregate cost change, -13.0% mean per-SKU, 95% CI [-26.4%, +0.4%]), only winning at a high stockout:holding ratio (20:1). This is kept as computed.
+8. **The dashboard hero claimed "4,900+ SKUs"** as if the live app optimized across the whole dataset; it only ever served the top 20. Now states the demo/dataset split honestly. Demo stock levels were a plain `index % 3` multiplier that almost never produced a healthy (no-action) SKU; now seeded from an approximation of each SKU's own reorder point so some SKUs correctly show no action needed. Product names now come from a small committed file so they don't silently degrade to "SKU {code}" when the raw CSV isn't present. Repeated identical dashboard reads within 15 minutes no longer each write a fresh `analysis_runs`/`prediction_logs` row.
 
 ---
 

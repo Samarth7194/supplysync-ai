@@ -33,8 +33,8 @@ Save each file under `docs/screenshots/` with the exact filename below so the ro
 - **URL:** `http://localhost:3000/sku/85099B`
 - **Pre-state:** default sliders (7 days / 95%), default demo stock.
 - **Capture:** Full-size screenshot.
-- **What to show:** Hero recommendation card (coloured to match risk band), the explanation trio ("Why this forecast path"), the historical demand chart with P50/P90 reference lines, the decision rationale panel, and the Model & Method provenance block with `artifact_available: true`.
-- **Why this SKU:** `85099B` (Jumbo Bag Red Retrospot) is a top-volume SKU in training — `forecast_source` should be `model_forecast`.
+- **What to show:** Hero recommendation card (coloured to match risk band), the explanation trio ("Why this forecast path"), the historical demand chart with 60-day avg / 60-day P90 reference lines, the decision rationale panel, and the Model & Method provenance block.
+- **Why this SKU:** `85099B` (Jumbo Bag Red Retrospot) is a top-volume, regular-demand SKU. With evidence-based routing on by default, regular-demand SKUs currently route to **Croston-SBA**, not LightGBM (the offline backtest shows LightGBM losing badly on this class — see the README), so `forecast_method` should be `croston` and `forecast_source` should be `statistical_method`. If you want an `ml_lightgbm` / `model_forecast` screenshot instead, pick a SKU the routing service actually sends there, or temporarily set `EVIDENCE_ROUTING_ENABLED=false`.
 
 ## 3. `03-sku-synthetic-path.png` — SKU detail (fallback path)
 

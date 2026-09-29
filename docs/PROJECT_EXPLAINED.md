@@ -20,7 +20,7 @@ AI problem: demand is not uniform. Some SKUs have regular demand, some are inter
 4. The user searches or selects a SKU.
 5. The SKU detail page loads `/api/skus/{sku}/history`, `/api/stock/{sku}`, and posts to `/api/analyze`.
 6. The backend resolves demand history, classifies the SKU, runs the chosen forecasting path, computes the reorder decision, persists analysis and prediction audit rows, then returns the same response shape expected by the UI.
-7. The UI displays P50/P90 demand, risk, safety stock, reorder point, recommended quantity, explanation text, and method provenance.
+7. The UI displays the 60-day historical mean/P90 demand, risk, safety stock, reorder point, recommended quantity, explanation text, and method provenance.
 
 ## 3. Frontend Pages
 
@@ -40,7 +40,7 @@ AI problem: demand is not uniform. Some SKUs have regular demand, some are inter
 
 ## 5. Graphs And KPIs
 
-Dashboard KPI cards come from `/api/kpis` and summarize the project backtest. The SKU detail chart shows recorded historical demand when the SKU exists in the processed dataset. The horizontal reference lines are historical demand summary levels: the backend field named p50 is currently the historical mean used for risk classification, while p90 is the historical 90th percentile.
+Dashboard KPI cards come from `/api/kpis` and summarize `scripts/compute_kpis.py`'s inventory-policy simulation (naive vs. moving-average-reorder-point vs. intelligent), not the forecast backtest. The SKU detail chart shows recorded historical demand when the SKU exists in the processed dataset. The horizontal reference lines are historical demand summary levels, named for what they are: `historical_mean_60d` is the 60-day historical mean, and `historical_p90_60d` is the 60-day historical 90th percentile — neither is a forecast percentile. (The API still returns the same values under the old `p50`/`p90` keys as deprecated aliases for one release.)
 
 Key metrics:
 
@@ -202,7 +202,7 @@ The decision layer accounts for:
 
 ## 22. Prediction Logging
 
-Every successful analysis can create a `prediction_logs` row with SKU, timestamp, demand source, forecast method, model name/version, input history length, forecast horizon, P50/P90 output, daily forecast, recommended quantity, and nullable actual observed demand.
+Every successful analysis can create an `analysis_runs` row and a linked `prediction_logs` row with SKU, timestamp, demand source, forecast method, model name/version, input history length, forecast horizon, the 60-day historical mean/P90, daily forecast, recommended quantity, and nullable actual observed demand — unless an identical analysis (same SKU, stock, lead time, service level) was already persisted in the last 15 minutes, in which case the repeat is deduped so a dashboard reload doesn't write a fresh row every time.
 
 This makes later forecast monitoring possible without changing the user-facing response.
 

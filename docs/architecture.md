@@ -62,21 +62,37 @@ Where: [`backend/scripts/train_model.py`](../backend/scripts/train_model.py), [`
 ```
 train_model.py                           evaluate_forecast.py
     │                                         │
-    ├ load parquet                            ├ load parquet + trained artifact
-    ├ build per-SKU features                  ├ temporal holdout (last 30 days / SKU)
-    ├ temporal split (last 30 days → test)    ├ walk-forward one-step-ahead
-    ├ fit LGBMRegressor                       ├ compare LightGBM vs 4 baselines
-    ├ evaluate MAE / RMSE                     │   (naive_last, seasonal_naive_7,
-    ├ save pkl + metadata.json                │    moving_avg_7, croston_sba)
-    └ cache per-SKU last-feature-rows         ├ metrics: MAE / RMSE / bias / WAPE / MASE
+    ├ load parquet                            ├ load parquet + trained artifact(s)
+    ├ build per-SKU features                  ├ src/evaluation/backtest.py:
+    ├ temporal split (last 30 days → test)    │   rolling-origin, multi-step —
+    ├ fit LGBMRegressor                       │   at each origin, forecast the
+    │   (--objective regression|tweedie|      │   whole horizon at once (no
+    │    poisson)                             │   actuals fed back mid-horizon),
+    ├ evaluate MAE / RMSE                     │   score vs what really followed
+    ├ save pkl + metadata.json                ├ compare every method vs 4
+    └ cache per-SKU last-feature-rows         │   reference baselines (predict_zero,
+                                              │   moving_avg_7, seasonal_naive_7,
+                                              │   croston_sba) — always included
+                                              │   so nothing is judged in isolation
+                                              ├ metrics: MAE / RMSE / bias / WAPE
+                                              │   (daily + lead-time-sum) / MASE
                                               ├ aggregate per demand class
                                               └ write forecast_evaluation.{json,csv}
 ```
 
-Model metadata captures the feature schema, train-SKU list, training MAE/RMSE,
-ISO-timestamped `saved_at`, artifact checksum, explicit version, feature-schema
-version, and lifecycle status. The evaluation artifact captures the generator
-timestamp, per-SKU metrics, and aggregates with the same vocabulary the UI uses.
+The same `backtest.py` module is the single evaluation engine for
+`evaluate_forecast.py`, `candidate_evaluation_service.py`,
+`historical_monitoring_replay_service.py`, `model_monitoring_service.py`, and
+`model_routing_service.py` — one methodology, not several copy-pasted
+one-step loops (that was a real bug, fixed; see the README's
+[What I Found and Changed](../README.md#what-i-found-and-changed)).
+
+Model metadata captures the feature schema (versioned — `demand_lag_calendar_v1`
+or the newer `demand_lag_calendar_sku_v2` with added SKU-profile features),
+train-SKU list, training MAE/RMSE, ISO-timestamped `saved_at`, artifact
+checksum, explicit version, feature-schema version, and lifecycle status. The
+evaluation artifact captures the generator timestamp, per-SKU metrics, and
+aggregates with the same vocabulary the UI uses.
 
 ## 4. Live analyze flow
 
@@ -96,21 +112,32 @@ For every `POST /api/analyze` request:
     ▼
  2. IntelligentInventoryService.get_intelligent_reorder_decision()
     ├ classify_sku_demand_pattern     (regular | intermittent | highly_intermittent)
-    ├ adaptive_forecast               (picks method per pattern)
-    │    ├ regular         → build inference feature row, call LightGBM
-    │    │                   (ml path); if any step fails, fall back to
-    │    │                   7-day moving average, logged with reason
-    │    ├ intermittent    → croston_forecast (SBA bias correction)
-    │    └ highly_interm.  → conservative buffer (recent mean × 1.5)
+    ├ ModelRoutingService.select_method   (evidence-based; on by default)
+    │    reads the offline backtest evidence and only switches away from the
+    │    legacy per-pattern default if a method beats every reference
+    │    baseline there. With the evidence currently committed, this sends
+    │    regular-demand SKUs to Croston-SBA instead of LightGBM.
+    ├ adaptive_forecast               (runs whichever method was selected)
+    │    ├ ml_lightgbm    → recursive_forecast: rebuilds lag/rolling/calendar
+    │    │                  features from the extended series at *each* of
+    │    │                  the H recursive steps (not one static row); if
+    │    │                  any step fails, fall back to 7-day moving
+    │    │                  average, logged with reason
+    │    ├ croston        → croston_forecast (SBA bias correction)
+    │    └ conservative   → conservative buffer (recent mean × 1.5)
     ├ compute dynamic / traditional safety stock
     ├ compute_reorder_decision        (reorder point, order quantity)
     └ apply_business_constraints      (MOQ, order multiple, max order)
     │
     ▼
  3. Compose response
-    • forecast.{p50,p90,daily}
+    • forecast.{historical_mean_60d, historical_p90_60d, daily}
+      (p50/p90 kept as deprecated aliases with identical values)
     • decision.{lead_time_days, lead_time_demand, safety_stock,
                 reorder_point, service_level, inventory_gap, why}
+      risk is HIGH if current_stock < lead_time_demand, MEDIUM if
+      < reorder_point, else LOW — LOW never produces a nonzero order
+    • routing.{selected_method, default_method, selection_source, reason, ...}
     • model_info.{model_name, model_type, artifact_available, ...}
     • demand_source / forecast_method / forecast_source
 ```
@@ -121,12 +148,24 @@ Every provenance field is truthful: if the ML model isn't loaded (`_loaded_model
 
 Where: [`backend/scripts/compute_kpis.py`](../backend/scripts/compute_kpis.py), [`backend/src/simulation/`](../backend/src/simulation).
 
-`compute_kpis.py` runs a day-by-day simulation on the top 10 SKUs using:
+`compute_kpis.py` runs a day-by-day simulation on the top 50 SKUs (a 14-day
+warm-up excluded from every metric, 90 measured days) comparing three
+policies, all deciding off inventory *position* (on-hand + on-order):
 
 - **naive policy**: reorder 2 weeks of average demand when stock drops below 1 week of average demand.
-- **intelligent policy**: the same `IntelligentInventoryService` the live API uses.
+- **moving_average_rop**: an (s, S) reorder-point policy with a fixed safety stock (computed once from the warm-up window) and a rolling demand-rate estimate.
+- **intelligent policy**: the same `IntelligentInventoryService` the live API uses — the real loaded LightGBM model and evidence-based routing, not `model=None`.
 
-It writes aggregate totals (holding cost, stockout cost, fill rate, cost savings vs naive) to `backend/data/cached_kpis.json`. `GET /api/kpis` returns that file with an `interpretation` block describing the baseline, assumptions (lead time = 7, service level = 0.95, holding cost = 0.5/unit, stockout cost = 5/unit, 90-day window), and a one-sentence meaning per KPI.
+It writes aggregate totals (holding cost, stockout cost, fill rate, cost
+savings vs. whichever baseline was actually cheaper, a 95% CI across SKUs,
+and sensitivity to the stockout:holding cost ratio) to
+`backend/data/cached_kpis.json`. `GET /api/kpis` returns that file with an
+`interpretation` block describing both baselines, assumptions (lead time = 7,
+service level = 0.95, holding cost = 0.5/unit, stockout cost = 5/unit, 90-day
+measured window, 14-day warm-up), and a one-sentence meaning per KPI. **The
+current honest result is negative**: the intelligent policy costs more than
+the naive baseline at these cost assumptions — see the README's
+[What I Found and Changed](../README.md#what-i-found-and-changed).
 
 ## 6. Frontend consumption
 
@@ -149,7 +188,7 @@ Every surface that displays a value renders its provenance via the shared [`Data
 | ML inference wiring | [`adaptive_forecasting_service.py`](../backend/src/services/adaptive_forecasting_service.py), [`inference_features.py`](../backend/src/features/inference_features.py) |
 | Inventory math | [`reorder_point.py`](../backend/src/inventory/reorder_point.py), [`business_constraints.py`](../backend/src/inventory/business_constraints.py) |
 | Uncertainty | [`dynamic_sigma.py`](../backend/src/uncertainty/dynamic_sigma.py), [`prediction_intervals.py`](../backend/src/uncertainty/prediction_intervals.py) |
-| Evaluation | [`evaluation/metrics.py`](../backend/src/evaluation/metrics.py), [`evaluation/baselines.py`](../backend/src/evaluation/baselines.py), [`scripts/evaluate_forecast.py`](../backend/scripts/evaluate_forecast.py) |
+| Evaluation | [`evaluation/backtest.py`](../backend/src/evaluation/backtest.py) (shared rolling-origin engine), [`evaluation/metrics.py`](../backend/src/evaluation/metrics.py), [`evaluation/baselines.py`](../backend/src/evaluation/baselines.py), [`scripts/evaluate_forecast.py`](../backend/scripts/evaluate_forecast.py) |
 | Simulation | [`inventory_simulator.py`](../backend/src/simulation/inventory_simulator.py), [`enhanced_simulator.py`](../backend/src/simulation/enhanced_simulator.py) |
 | Decision composition | [`analysis_service.py`](../backend/src/services/analysis_service.py), [`intelligent_inventory_service.py`](../backend/src/services/intelligent_inventory_service.py) |
 | Provenance vocabulary | `classify_forecast_source`, `_model_info_for_method` in [`analysis_service.py`](../backend/src/services/analysis_service.py) + [`DataSourceBadge.tsx`](../frontend/components/DataSourceBadge.tsx) |
@@ -157,7 +196,7 @@ Every surface that displays a value renders its provenance via the shared [`Data
 ## 8. What is real vs demo
 
 - **Real**: demand history from the parquet (fed to analyze when the SKU is known), the trained LightGBM predictions when the pkl is loaded, Croston / conservative forecasts, simulated KPIs, evaluation numbers.
-- **Demo**: `current_stock` shown on the dashboard and SKU page (derived from each SKU's average demand — clearly labeled with a `DEMO` pill). A real integration would pass live stock as the `current_stock` request field.
+- **Demo**: `current_stock` shown on the dashboard and SKU page (seeded from an approximation of each SKU's own reorder point — lead-time demand + safety stock from its average demand and demand std — hashed deterministically per SKU so some SKUs land above their reorder point and correctly show no action needed; clearly labeled with a `DEMO` pill). A real integration would pass live stock as the `current_stock` request field.
 - **Synthetic fallback**: Poisson(20) demand when the requested SKU isn't in the processed dataset — flagged with `demand_source: "synthetic"` and an amber page-top banner.
 
 ## 9. Analysis Service Boundary

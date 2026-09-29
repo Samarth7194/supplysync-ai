@@ -153,14 +153,25 @@ real-world baseline every candidate needs to beat.
 
 ## What would need to happen for this to reach production
 
-1. Evidence-based routing (Step 4) needs to be fed *this* kind of multi-step
-   evidence, not the one-step evidence it was built to consume, and given a
-   "must beat the strongest baseline" rule — not just "must beat the legacy
-   default."
-2. A candidate still needs to clear the promotion gate (Step 5) — beating the
-   *active* artifact is not the same as beating the *best available method*
-   for its class, which is exactly the gap Step 5 closes.
-3. Even then: none of the three candidates beats Croston-SBA on the
-   regular-demand class specifically, so a routing change would matter most
-   for intermittent/highly-intermittent SKUs, not for the class LightGBM is
-   currently scoped to.
+**Update:** Steps 4 and 5 below are now done (see the README's
+[What I Found and Changed](../README.md#what-i-found-and-changed)). Evidence-
+based routing (`ModelRoutingService`) now consumes this shared multi-step
+backtest and requires a method to beat every reference baseline, not just the
+legacy default, and the promotion gate (`candidate_evaluation_service.py`)
+requires a candidate to beat the strongest baseline, not merely the active
+artifact. What's left is the one thing routing/promotion can't fix by
+themselves:
+
+1. ~~Evidence-based routing needs to be fed this kind of multi-step evidence
+   and given a "must beat the strongest baseline" rule.~~ Done.
+2. ~~A candidate needs to clear a promotion gate that requires beating the
+   best available method, not just the active artifact.~~ Done.
+3. **None of these three candidates has actually been trained on the
+   production feature schema and registered.** They still exist only as
+   local files under `backend/saved_models/candidates/` (gitignored, never
+   registered in `model_artifacts`, never promoted). Even if one were
+   registered, none of the three beats Croston-SBA on the regular-demand
+   class specifically (best: tweedie at 0.489 vs Croston-SBA's 0.444), so a
+   real promotion would only make sense for the intermittent/highly-
+   intermittent classes, where the candidates do beat what the live router
+   does today for those classes.

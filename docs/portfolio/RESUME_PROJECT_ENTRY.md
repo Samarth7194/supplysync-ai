@@ -12,14 +12,15 @@ Python · FastAPI · LightGBM · SQLAlchemy · PostgreSQL · Next.js · TypeScri
 
 ## C. Resume Bullets (full version — 3 bullets)
 
-- Built a hybrid demand-forecasting pipeline (LightGBM, Croston-SBA, conservative buffer) that routes ~4,900 SKUs by demand pattern, converting forecasts into uncertainty-aware, constrained reorder recommendations.
+- Built a hybrid demand-forecasting pipeline (LightGBM, Croston-SBA, conservative buffer), backtested across ~4,900 SKUs and evidence-routed by demand pattern, converting forecasts into uncertainty-aware, constrained reorder recommendations.
+- Found and fixed a recursion bug in the LightGBM forecast and a flawed one-step-ahead evaluation methodology, then used the corrected multi-step backtest to show Croston-SBA beating LightGBM on the class it's scoped to and rewire routing accordingly.
 - Designed a controlled MLOps lifecycle — forecast evaluation, performance monitoring, retraining recommendations, candidate training/evaluation, and human-approved promotion/rollback with a full audit trail.
-- Deployed a full-stack app (Next.js/Vercel, FastAPI/Render, PostgreSQL/Neon) with 280+ backend tests, CI-validated migrations, and a historical-replay mechanism that demonstrates monitoring without fabricating live data.
+- Deployed a full-stack app (Next.js/Vercel, FastAPI/Render, PostgreSQL/Neon) with 360+ backend tests, CI-validated migrations, and a historical-replay mechanism that demonstrates monitoring without fabricating live data.
 
 ## 2-Bullet Compact Version (for a one-page resume)
 
-- Built an ML inventory decision-support system with hybrid demand forecasting (LightGBM/Croston-SBA) and uncertainty-aware safety stock, routing ~4,900 SKUs to the appropriate method per demand pattern.
-- Implemented a controlled MLOps lifecycle — monitoring, degradation detection, candidate evaluation, and human-approved model promotion/rollback — deployed full-stack with 280+ tests in CI.
+- Built an ML inventory decision-support system with hybrid demand forecasting (LightGBM/Croston-SBA) and uncertainty-aware safety stock, backtested across ~4,900 SKUs and evidence-routed to the method that actually wins per demand pattern.
+- Implemented a controlled MLOps lifecycle — monitoring, degradation detection, candidate evaluation, and human-approved model promotion/rollback — deployed full-stack with 360+ tests in CI.
 
 ## Notes on Framing
 

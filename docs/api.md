@@ -123,34 +123,56 @@ curl http://localhost:8000/api/kpis
 
 ```json
 {
-  "total_cost": 1647932.0,
-  "fill_rate": 0.9567,
-  "cost_savings_pct": 37.8,
-  "holding_cost": 1624917.0,
-  "stockout_cost": 23015.0,
-  "naive_total_cost": 2650120.0,
-  "intelligent_total_cost": 1647932.0,
-  "skus_analyzed": 10,
-  "computed_at": "2026-04-01T13:18:17.588264",
+  "total_cost": 1418600.0,
+  "fill_rate": 0.8676,
+  "cost_savings_pct": -9.0,
+  "holding_cost": 1189830.0,
+  "stockout_cost": 228770.0,
+  "naive_total_cost": 1301417.5,
+  "intelligent_total_cost": 1418600.0,
+  "skus_analyzed": 50,
+  "computed_at": "2026-09-29T19:03:10.935867",
+  "moving_average_rop_total_cost": 1875342.5,
+  "strongest_baseline_method": "naive",
+  "strongest_baseline_total_cost": 1301417.5,
+  "cost_savings_vs_strongest_baseline_pct": -13.0,
+  "cost_savings_vs_strongest_baseline_ci95": [-26.4, 0.4],
+  "cost_savings_vs_naive_pct": -13.0,
+  "model_loaded": true,
+  "dataset_sku_count": 4900,
+  "skus_requested": 50,
+  "warmup_days": 14,
+  "measured_days": 90,
+  "lead_time_days": 7,
+  "policies_compared": ["naive_fixed_threshold", "moving_average_reorder_point", "intelligent"],
+  "sensitivity_to_cost_ratio": [
+    { "stockout_to_holding_ratio": 2.0, "cost_savings_vs_strongest_baseline_pct": -44.0 },
+    { "stockout_to_holding_ratio": 5.0, "cost_savings_vs_strongest_baseline_pct": -27.3 },
+    { "stockout_to_holding_ratio": 10.0, "cost_savings_vs_strongest_baseline_pct": -9.0 },
+    { "stockout_to_holding_ratio": 20.0, "cost_savings_vs_strongest_baseline_pct": 11.2 }
+  ],
   "interpretation": {
     "baseline": "naive",
-    "baseline_description": "Fixed-threshold policy: reorder 2 weeks of average demand whenever stock drops below 1 week of average demand.",
-    "intelligent_description": "Adaptive per-SKU policy: ...",
+    "baseline_description": "Two fixed baselines are simulated: naive (fixed-threshold) and moving_average_rop (reorder point with fixed safety stock). The headline savings figure compares against whichever is actually cheaper.",
+    "intelligent_description": "Adaptive per-SKU policy running the real production forecast path and evidence-based routing: ...",
     "assumptions": {
       "lead_time_days": 7,
       "service_level": 0.95,
       "holding_cost_per_unit": 0.5,
       "stockout_cost_per_unit": 5.0,
-      "simulation_window_days": 90
+      "simulation_window_days": 90,
+      "warmup_days": 14
     },
     "metric_meanings": {
-      "cost_savings_pct": "Total cost (holding + stockout) saved by the intelligent policy relative to the naive baseline...",
+      "cost_savings_vs_strongest_baseline_pct": "Mean per-SKU cost savings of the intelligent policy vs whichever baseline was actually cheaper for that SKU...",
       "fill_rate": "Fraction of demanded units that were actually fulfilled...",
       "..." : "..."
     }
   }
 }
 ```
+
+This is the *actual* current output of `scripts/compute_kpis.py` on this repo's real trained model — reproduce it with `cd backend && python scripts/compute_kpis.py`. Note it's currently negative: the intelligent policy costs more than the naive baseline at these cost assumptions (see the README's [What I Found and Changed](../README.md#what-i-found-and-changed)), and it isn't tuned to look better.
 
 Returns **404** when the cache hasn't been generated:
 
@@ -247,6 +269,8 @@ curl -X POST http://localhost:8000/api/analyze \
   "risk": "HIGH",
   "risk_color": "#ef4444",
   "forecast": {
+    "historical_mean_60d": 85.2,
+    "historical_p90_60d": 268.1,
     "p50": 85.2,
     "p90": 268.1,
     "daily": [79.1, 82.5, 88.0, 84.3, 91.2, 85.9, 82.7],
@@ -296,7 +320,7 @@ curl -X POST http://localhost:8000/api/analyze \
   "explanation": {
     "classification_reason": "Only 3% of the 60 observed days have zero demand (below the 50% threshold), so this SKU is routed as regular demand.",
     "method_reason": "Regular-demand SKUs are forecast with the trained LightGBM model using lag and calendar features — that's the path chosen here.",
-    "risk_reason": "Current stock (50) is below the P50 demand estimate (85.2) — any higher-than-median day risks a stockout.",
+    "risk_reason": "Current stock (50) is below the 7-day lead-time demand (593.7) - a stockout is likely before the next delivery arrives.",
     "confidence_note": "Forecast came from the trained LightGBM model; the recommendation reflects the model's regular-demand path."
   }
 }
@@ -308,7 +332,7 @@ curl -X POST http://localhost:8000/api/analyze \
 
 | Block | What it tells you |
 |---|---|
-| `forecast` | Historical demand summary values used for risk classification, the legacy 7-value `daily` series, and `full_horizon_daily` for the requested lead-time horizon. |
+| `forecast` | Historical demand summary values (`historical_mean_60d`, `historical_p90_60d` — 60-day descriptive statistics, not forecast percentiles; `p50`/`p90` are deprecated aliases with identical values, kept for one release), the legacy 7-value `daily` series, and `full_horizon_daily` for the requested lead-time horizon. |
 | `decision` | Every number that goes into the reorder computation: lead-time demand, safety stock and its method, reorder point, inventory gap, business-constraint metadata, and a plain-English `why`. |
 | `model_info` | Which path produced this response: trained ML, statistical method, or rule-based fallback. Honest about whether the `.pkl` is actually loaded. |
 | `explanation` | Four short, deterministic strings (no LLM): *classification_reason*, *method_reason*, *risk_reason*, *confidence_note*. Useful for dashboards that want to show "why" without composing copy themselves. |
@@ -362,6 +386,8 @@ curl "http://localhost:8000/api/analyses/recent?limit=3"
       "safety_stock": 194.3,
       "reorder_point": 788.0,
       "inventory_gap": 738.0,
+      "historical_mean_60d": 85.2,
+      "historical_p90_60d": 268.1,
       "p50": 85.2,
       "p90": 268.1
     }

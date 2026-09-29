@@ -4,7 +4,7 @@ import { AuthGate } from "@/components/AuthGate";
 
 export const metadata: Metadata = {
   title: "SupplySync AI - ML-Powered Inventory Optimization",
-  description: "Intelligent inventory management using LightGBM demand forecasting, adaptive safety stock, and cost optimization across 4,900+ SKUs.",
+  description: "Intelligent inventory management with evidence-routed demand forecasting and adaptive safety stock — a 20-SKU demo of a 4,900-SKU dataset.",
 };
 
 export default function RootLayout({

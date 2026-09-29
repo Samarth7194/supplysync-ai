@@ -61,6 +61,11 @@ The requested candidate artifact must also contain candidate evaluation metadata
 - active-model metrics
 - compatible evaluation horizon
 - enough test-point evidence
+- **the candidate must beat the strongest reference baseline** (predict-zero,
+  7-day moving average, seasonal-naive, Croston-SBA — whichever scores best
+  for that class), not merely the currently-active artifact. A candidate
+  that only beats a weak active model, while still losing to a plain moving
+  average, is not eligible.
 
 ## Production Runtime Semantics
 

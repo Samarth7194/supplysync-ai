@@ -17,14 +17,17 @@ These files are **offline backtest artifacts**, not live production performance:
 - `backend/data/forecast_error_analysis.json`
 - `backend/data/forecast_error_analysis.csv`
 
-The evaluator uses historical SKU demand, holds out the final horizon window,
-and compares runtime-capable forecasting methods against the recorded actuals.
+The evaluator (`src/evaluation/backtest.py`) is rolling-origin and multi-step:
+at every forecast origin in the evaluation window it forecasts the whole
+horizon at once (no actuals fed back mid-horizon) and scores it against the
+demand that really followed, then compares runtime-capable forecasting
+methods against the recorded actuals.
 
 ## Methods
 
 The benchmark includes:
 
-- naive last value
+- predict-zero
 - seasonal naive with lag 7
 - moving average over 7 days
 - Croston-SBA

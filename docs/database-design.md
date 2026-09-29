@@ -231,8 +231,8 @@ dashboard use case.
 | `safety_stock_method` | `varchar(32)` | nullable | `traditional` or `dynamic`. |
 | `reorder_point` | `numeric(14, 3)` | nullable | Decision threshold. |
 | `inventory_gap` | `numeric(14, 3)` | nullable | `max(0, reorder_point - current_stock)`. |
-| `p50` | `numeric(14, 3)` | nullable | Existing response forecast p50. |
-| `p90` | `numeric(14, 3)` | nullable | Existing response forecast p90. |
+| `historical_mean_60d` | `numeric(14, 3)` | nullable | 60-day historical mean demand (renamed from `p50`; never a forecast percentile). |
+| `historical_p90_60d` | `numeric(14, 3)` | nullable | 60-day historical 90th-percentile demand (renamed from `p90`). |
 | `forecast_daily` | `jsonb` | nullable | Daily horizon output for audit/replay. |
 | `explanation` | `jsonb` | nullable | Existing deterministic explanation block. |
 | `created_at` | `timestamptz` | not null, default `now()` | API decision timestamp. |
@@ -282,8 +282,8 @@ later compare predicted demand to actual observed demand.
 | `model_artifact_id` | `bigint` | foreign key to `model_artifacts.id`, nullable | Populated for trained artifacts. |
 | `input_history_length` | `integer` | not null, check `>= 0` | Number of demand observations used. |
 | `forecast_horizon_days` | `integer` | not null, check `> 0` | Number of future days predicted. |
-| `p50` | `numeric(14, 3)` | nullable | Prediction summary. |
-| `p90` | `numeric(14, 3)` | nullable | Prediction summary. |
+| `historical_mean_60d` | `numeric(14, 3)` | nullable | 60-day historical mean demand (renamed from `p50`). |
+| `historical_p90_60d` | `numeric(14, 3)` | nullable | 60-day historical 90th-percentile demand (renamed from `p90`). |
 | `forecast_daily` | `jsonb` | nullable | Daily values. |
 | `recommended_order_quantity` | `integer` | not null, check `>= 0` | Recommendation linked to this forecast. |
 | `actual_observed_demand` | `numeric(14, 3)` | nullable, check `>= 0` | Filled later when actuals are known. |

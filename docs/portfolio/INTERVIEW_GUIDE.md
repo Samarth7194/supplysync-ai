@@ -10,7 +10,7 @@ Practical prep for discussing this project in a technical interview. Answers are
 
 ## 90-Second Explanation
 
-Extend the 30-second version with: "The interesting part isn't really the forecasting model — it's that no single forecasting method works well across all demand patterns on real retail data. Regular SKUs have enough signal for LightGBM to learn lag and calendar relationships, but on sparse, intermittent SKUs, LightGBM's bias turns strongly positive because it doesn't handle long runs of zero demand well — Croston-SBA is specifically designed for that. So the system runs an evidence-based router that picks per SKU, and I validated that with an offline backtest before wiring it live.
+Extend the 30-second version with: "The interesting part isn't really the forecasting model — it's that no single forecasting method works well across all demand patterns on real retail data, and that includes the one it's actually scoped to. LightGBM doesn't just lose on sparse, intermittent SKUs — a corrected, multi-step backtest shows Croston-SBA beating it on *regular*-demand SKUs too (0.444 vs 1.351 WAPE). So the system runs an evidence-based router that only switches a class away from its legacy default when a method actually beats every reference baseline in the backtest, and with the evidence currently committed, that sends regular-demand SKUs to Croston-SBA — not LightGBM. I validated that with the same offline backtest before wiring it live, and I didn't stop there: finding that result meant fixing the backtest methodology itself (it used to be a flawed one-step-ahead evaluation) and a real bug in the recursive LightGBM forecast before trusting any of these numbers.
 
 The other half is the MLOps lifecycle. Since the demo runs on a frozen historical dataset with no live ERP feed, I couldn't just let live monitoring sit empty — but I also refused to fabricate live actuals to make a dashboard look populated. So I built a historical replay mechanism that runs the exact same evaluate → monitor → classify pipeline against held-out historical windows, clearly labeled as replay, not live evidence, and structurally unable to trigger retraining or promotion. Promotion and rollback are both real, evidence-gated, audited operations — but they're CLI-only and human-approved by design; nothing auto-trains or auto-promotes."
 
@@ -29,11 +29,11 @@ The other half is the MLOps lifecycle. Since the demo runs on a frozen historica
 
 ## Why Hybrid Forecasting?
 
-Because a single global model doesn't dominate on real retail demand. The offline backtest showed Croston-SBA beating LightGBM in aggregate WAPE (0.87 vs 0.99 across 20 SKUs), and LightGBM's bias turning sharply positive on intermittent SKUs specifically. Rather than accept that or force one model everywhere, the system routes per demand pattern and lets evidence — not assumption — decide.
+Because a single global model doesn't dominate on real retail demand — and the margin is large. The corrected multi-step, rolling-origin backtest (200 SKUs, H=7) shows Croston-SBA beating LightGBM in aggregate WAPE (0.490 vs 1.560, lead-time-sum), with LightGBM's bias turning sharply positive across every class, worst on intermittent/highly-intermittent SKUs (+456% and +697% respectively). Rather than accept that or force one model everywhere, the system routes per demand pattern based on that evidence, with a hard rule: a method is only selected if it beats every reference baseline, not just the legacy default.
 
 ## Why LightGBM?
 
-It's fast to train, handles tabular lag/calendar features well without heavy preprocessing, and gives interpretable feature importances. It was never assumed to be the best choice for every SKU — that's exactly why it's scoped to regular demand and validated against baselines rather than deployed unconditionally.
+It's fast to train, handles tabular lag/calendar features well without heavy preprocessing, and gives interpretable feature importances. It was never assumed to be the best choice for every SKU, and the backtest bears that out: on the exact class it's scoped to (regular demand), Croston-SBA still beats it (0.444 vs 1.351 WAPE), even after retraining LightGBM on 2,545 SKUs with SKU-profile features and a tweedie objective (best result: 0.489 — closer, but still short). Evidence-based routing acts on that directly: regular-demand SKUs currently route to Croston-SBA in production, not LightGBM. LightGBM candidates do win on intermittent and highly-intermittent SKUs relative to what the live router does today for those classes — see [docs/model-candidates-comparison.md](../model-candidates-comparison.md) — but none of those candidates are registered or promoted yet.
 
 ## Why Croston-SBA?
 
@@ -67,9 +67,9 @@ Because retraining and promotion change what's actually making decisions in prod
 
 Live monitoring needs real predictions **and** the genuine future demand that later arrives for them. The dataset this project runs on is historical and frozen — it ends in December 2011 — so predictions made "today" target windows the dataset can never fill in with real actuals. Rather than fabricate demand or leave the monitoring feature looking permanently broken, Historical Replay runs the identical evaluate → monitor → classify pipeline against **already-recorded** historical demand at an earlier anchor date. It reuses the real forecasting code and real classification thresholds, but it's labeled `historical_replay` everywhere it appears and is architecturally incapable of writing to the same tables live monitoring uses — so it can't accidentally influence a real retraining decision.
 
-## Why WAPE Is High
+## Why Is LightGBM's WAPE So High?
 
-Because sparse, intermittent retail demand is genuinely hard to forecast — a WAPE around or above 1.0 is common on datasets like this, not evidence of a bug. Most days for most SKUs have low or zero demand, so a handful of demand spikes dominate the error total no matter which method you use. I'm not going to pretend otherwise: the honest response isn't to tune metrics until they look better, it's architectural — route each SKU to the method that's actually validated as best for its demand shape (this is exactly why Croston-SBA outperforms LightGBM in aggregate on this dataset), and keep monitoring in place to catch it if a routed method starts underperforming its own baseline.
+Because of a real, since-fixed bug, plus a genuine limit of the model on this data. The recursive multi-step forecast used to mutate a single static feature row at each step instead of rebuilding lag/rolling/calendar features from the extended series — calendar features froze and `rolling_std` collapsed to zero after the first step. Fixing that cut LightGBM's lead-time-sum WAPE roughly 3x on regular-demand SKUs (3.736 → 1.351 at H=7). That's a real improvement, but it's still worse than every reference baseline, including plain predict-zero (1.000). I'm not tuning past that to make the number look better — a WAPE above 1.0 on a corrected, multi-step backtest is a real result: LightGBM isn't the right tool for this class of demand on this dataset, at least not the plain-regression objective currently in production. The honest response is architectural, not cosmetic: route each SKU to whichever method the backtest actually shows winning for its demand shape — which is exactly why evidence-based routing now sends regular-demand SKUs to Croston-SBA instead — and keep monitoring in place to catch it if a routed method starts underperforming its own baseline.
 
 ## Biggest Technical Challenges
 
@@ -82,7 +82,8 @@ Because sparse, intermittent retail demand is genuinely hard to forecast — a W
 
 ## What I Would Improve Next
 
-- Fix the recursive LightGBM forecasting limitation where future calendar features (day-of-week, month, etc.) aren't advanced correctly during multi-day recursive prediction.
+- Close the remaining regular-demand gap: even the best retrained LightGBM candidate (tweedie objective, wider training data, SKU-profile features) doesn't beat Croston-SBA on that class yet (0.489 vs 0.444 WAPE).
+- Investigate why the KPI/ROI simulation's intelligent policy currently costs *more* than the naive baseline (-9% aggregate, -13% mean per-SKU) once it's actually running the real model and evidence-based routing — it only wins at a high stockout:holding cost ratio (20:1) in the current sensitivity sweep.
 - Add real feature/input-distribution drift detection alongside the existing forecast-performance monitoring.
 - Connect a live ERP/POS feed so live monitoring can accumulate genuine new evidence instead of relying on historical replay.
 - Move to probabilistic (quantile or conformal) forecasting instead of the current residual-based uncertainty approximation.
@@ -91,10 +92,10 @@ Because sparse, intermittent retail demand is genuinely hard to forecast — a W
 ## Common Interview Questions
 
 **Why not use LSTM or a deep learning model?**
-The dataset is small per SKU (roughly a two-year daily series) and demand is sparse for most SKUs — deep sequence models typically need more data than that to beat well-tuned classical/tree-based baselines, and the offline backtest already shows LightGBM isn't even the best option on this data for every demand class. Adding model complexity without evidence it helps would be the wrong lesson from this project.
+The dataset is small per SKU (roughly a two-year daily series) and demand is sparse for most SKUs — deep sequence models typically need more data than that to beat well-tuned classical/tree-based baselines, and the offline backtest already shows the production LightGBM artifact isn't the best option on *any* demand class on this data, let alone one a heavier model would fix. Adding model complexity without evidence it helps would be the wrong lesson from this project.
 
 **Why not use one model for all SKUs?**
-Because the backtest shows it doesn't work well — LightGBM's bias goes strongly positive on intermittent SKUs specifically, while Croston-SBA is built for exactly that case. Routing by demand pattern is a direct response to measured evidence, not an assumption.
+Because the backtest shows it doesn't work well — LightGBM's bias goes strongly positive on every class, worst on intermittent and highly-intermittent SKUs specifically (+456% and +697% respectively), while Croston-SBA (intermittent's legacy default) and a conservative buffer (highly-intermittent's) are both built for exactly that case. Routing by demand pattern is a direct response to measured evidence, not an assumption — and the same evidence is what now moves the *regular*-demand default away from LightGBM too.
 
 **How do you prevent data leakage?**
 Every evaluation path checks that the target window has actually completed and that real recorded demand exists for it before scoring; historical replay explicitly truncates the demand series at the anchor date before generating any forecast. Both are covered by tests.

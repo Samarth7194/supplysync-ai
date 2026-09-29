@@ -22,19 +22,19 @@ backend/
 │   ├── ingestion/              # UCI CSV → cleaned daily-demand parquet
 │   ├── inventory/              # Safety stock, reorder point, order-qty constraints
 │   ├── services/               # AdaptiveForecastingService (the method router)
-│   ├── simulation/             # Day-by-day naive-vs-intelligent policy comparison
+│   ├── simulation/             # Day-by-day naive vs moving-avg-ROP vs intelligent policy comparison
 │   └── uncertainty/            # Rolling forecast error → dynamic safety stock
 ├── scripts/
 │   ├── check_setup.py          # Prints [OK] / [MISSING] per required artifact
 │   ├── bootstrap.py            # One-shot: trains + computes KPIs if missing
-│   ├── train_model.py          # Fits LightGBM on top-20 SKUs; writes .pkl + metadata
-│   ├── compute_kpis.py         # Naive vs intelligent cost simulation → cached KPIs
-│   ├── evaluate_forecast.py    # LightGBM vs 4 baselines on temporal split
+│   ├── train_model.py          # Fits LightGBM on every SKU with >=60 days of history; writes .pkl + metadata
+│   ├── compute_kpis.py         # Naive vs moving-avg-ROP vs intelligent cost simulation → cached KPIs
+│   ├── evaluate_forecast.py    # Rolling-origin, multi-step backtest vs 4 reference baselines
 │   ├── evaluate_cross_sku.py   # NEW — unseen-SKU k-fold generalization test
 │   └── evaluate_custom_dataset.py  # NEW — zero-shot evaluation on any compatible CSV
 ├── saved_models/               # lightgbm_demand_forecast.pkl + _metadata.json
 ├── data/                       # cached_kpis.json, forecast_evaluation.{json,csv}, historical_monitoring_replay.json (local dev DB: data/supplysync.db)
-└── tests/                      # 280+ pytest cases
+└── tests/                      # 360+ pytest cases
 ```
 
 ---
@@ -97,7 +97,7 @@ Three evaluation entry points, each a standalone script:
 
 | Script | Answers |
 |---|---|
-| `evaluate_forecast.py` | "On the trained SKUs, does LightGBM beat the classical baselines on a temporal holdout?" |
+| `evaluate_forecast.py` | "On a rolling-origin, multi-step backtest, does LightGBM (or the live hybrid router) beat the reference baselines — per demand class, not just in aggregate?" |
 | `evaluate_cross_sku.py` | "If we hold out SKUs the model never saw, how does it compare to baselines?" |
 | `evaluate_custom_dataset.py` | "If I apply the current model to a different retail CSV, what do baselines vs LightGBM look like?" |
 
@@ -136,7 +136,7 @@ shell. Key ones:
 ## Where to look first
 
 - **Routes** → [`main.py`](./main.py). Every endpoint is in one file by design — fast to scan.
-- **Method routing** (regular → LightGBM, intermittent → Croston, highly intermittent → conservative buffer) → [`src/services/adaptive_forecasting_service.py`](./src/services/adaptive_forecasting_service.py).
+- **Method routing** (legacy per-pattern default: regular → LightGBM, intermittent → Croston, highly intermittent → conservative buffer; overridden by evidence-based routing when backtest evidence shows a different method winning — currently regular → Croston-SBA) → [`src/services/adaptive_forecasting_service.py`](./src/services/adaptive_forecasting_service.py) and [`src/services/model_routing_service.py`](./src/services/model_routing_service.py).
 - **Reorder math** → [`src/inventory/`](./src/inventory/).
 - **How the API response is assembled** (risk, decision block, explanation, model_info) → [`src/services/analysis_service.py`](./src/services/analysis_service.py).
 - **Persistence** → [`src/repositories/analysis_repository.py`](./src/repositories/analysis_repository.py), [`src/repositories/stock_repository.py`](./src/repositories/stock_repository.py), and [`src/db/session.py`](./src/db/session.py).
