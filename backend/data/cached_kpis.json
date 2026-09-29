@@ -1,11 +1,61 @@
 {
-  "total_cost": 1645905.0,
-  "fill_rate": 0.9567,
-  "cost_savings_pct": 37.9,
-  "holding_cost": 1622790.0,
-  "stockout_cost": 23115.0,
-  "naive_total_cost": 2650120.0,
-  "intelligent_total_cost": 1645905.0,
-  "skus_analyzed": 10,
-  "computed_at": "2026-05-23T14:10:18.808785"
+  "total_cost": 1418600.0,
+  "fill_rate": 0.8676,
+  "cost_savings_pct": -9.0,
+  "holding_cost": 1189830.0,
+  "stockout_cost": 228770.0,
+  "naive_total_cost": 1301417.5,
+  "intelligent_total_cost": 1418600.0,
+  "skus_analyzed": 50,
+  "computed_at": "2026-09-29T19:03:10.935867",
+  "moving_average_rop_total_cost": 1875342.5,
+  "strongest_baseline_method": "naive",
+  "strongest_baseline_total_cost": 1301417.5,
+  "cost_savings_vs_strongest_baseline_pct": -13.0,
+  "cost_savings_vs_strongest_baseline_ci95": [
+    -26.4,
+    0.4
+  ],
+  "cost_savings_vs_naive_pct": -13.0,
+  "model_loaded": true,
+  "dataset_sku_count": 4900,
+  "skus_requested": 50,
+  "warmup_days": 14,
+  "measured_days": 90,
+  "lead_time_days": 7,
+  "policies_compared": [
+    "naive_fixed_threshold",
+    "moving_average_reorder_point",
+    "intelligent"
+  ],
+  "sensitivity_to_cost_ratio": [
+    {
+      "stockout_to_holding_ratio": 2.0,
+      "naive_total_cost": 857769.5,
+      "moving_average_rop_total_cost": 1747994.5,
+      "intelligent_total_cost": 1235584.0,
+      "cost_savings_vs_strongest_baseline_pct": -44.0
+    },
+    {
+      "stockout_to_holding_ratio": 5.0,
+      "naive_total_cost": 1024137.5,
+      "moving_average_rop_total_cost": 1795750.0,
+      "intelligent_total_cost": 1304215.0,
+      "cost_savings_vs_strongest_baseline_pct": -27.3
+    },
+    {
+      "stockout_to_holding_ratio": 10.0,
+      "naive_total_cost": 1301417.5,
+      "moving_average_rop_total_cost": 1875342.5,
+      "intelligent_total_cost": 1418600.0,
+      "cost_savings_vs_strongest_baseline_pct": -9.0
+    },
+    {
+      "stockout_to_holding_ratio": 20.0,
+      "naive_total_cost": 1855977.5,
+      "moving_average_rop_total_cost": 2034527.5,
+      "intelligent_total_cost": 1647370.0,
+      "cost_savings_vs_strongest_baseline_pct": 11.2
+    }
+  ]
 }

@@ -388,8 +388,15 @@ export default function Dashboard() {
             Forecast-driven reorder recommendations
           </h1>
           <p className="text-base text-gray-400 max-w-2xl mx-auto leading-relaxed">
-            ML-powered inventory optimization across{" "}
-            <span className="text-white font-semibold">4,900+ SKUs</span> from{" "}
+            A{" "}
+            <span className="text-white font-semibold">
+              {skuDetails.length || 20}-SKU demo
+            </span>{" "}
+            of a{" "}
+            <span className="text-white font-semibold">
+              {kpis?.dataset_sku_count ? formatNumber(kpis.dataset_sku_count) : "4,900"}-SKU dataset
+            </span>{" "}
+            from{" "}
             <span className="text-white font-semibold">1M+ retail transactions</span> —
             with explicit provenance on every recommendation.
           </p>
@@ -459,7 +466,12 @@ export default function Dashboard() {
             eyebrow="Performance"
             title="Backtest Performance"
             subtitle={
-              "Results from the project backtest. Hover over each metric for its definition."
+              kpis
+                ? `Simulated on ${formatNumber(kpis.skus_analyzed)} SKUs (top by volume), ` +
+                  `${kpis.measured_days ?? 90} measured days after a ${kpis.warmup_days ?? 14}-day warm-up. ` +
+                  "Policies compared: naive fixed-threshold, moving-average reorder-point, and the intelligent (production) policy. " +
+                  "Hover over each metric for its definition."
+                : "Results from the project backtest. Hover over each metric for its definition."
             }
           />
         </section>
@@ -473,13 +485,19 @@ export default function Dashboard() {
         <section className="grid grid-cols-2 lg:grid-cols-4 gap-4">
           <KpiCard
             icon={TrendingDown}
-            value={kpis ? `${formatNumber(kpis.cost_savings_pct, { maximumFractionDigits: 1 })}%` : "…"}
-            label="Cost Savings"
-            sublabel="vs naive fixed-threshold policy"
-            color="bg-green-600"
+            value={
+              kpis?.cost_savings_vs_strongest_baseline_pct !== undefined
+                ? `${formatNumber(kpis.cost_savings_vs_strongest_baseline_pct, { maximumFractionDigits: 1 })}%`
+                : "…"
+            }
+            label={
+              (kpis?.cost_savings_vs_strongest_baseline_pct ?? 0) < 0 ? "Cost Increase" : "Cost Savings"
+            }
+            sublabel={`vs strongest baseline (${kpis?.strongest_baseline_method === "moving_average_rop" ? "moving-avg ROP" : "naive"})`}
+            color={(kpis?.cost_savings_vs_strongest_baseline_pct ?? 0) < 0 ? "bg-red-600" : "bg-green-600"}
             tooltip={
-              kpis?.interpretation?.metric_meanings?.cost_savings_pct ??
-              "Simulated total cost (holding + stockout) saved vs the naive baseline."
+              kpis?.interpretation?.metric_meanings?.cost_savings_vs_strongest_baseline_pct ??
+              "Simulated total cost (holding + stockout) saved vs whichever baseline was actually cheaper for that SKU. A negative number means the intelligent policy cost more."
             }
           />
           <KpiCard
@@ -495,11 +513,14 @@ export default function Dashboard() {
           />
           <KpiCard
             icon={Package}
-            value="4,900+"
+            value={kpis?.dataset_sku_count ? formatNumber(kpis.dataset_sku_count) : "4,900+"}
             label="SKUs in Dataset"
-            sublabel="UCI Online Retail II"
+            sublabel={`Demo serves ${skuDetails.length || 20}; simulation uses ${kpis ? formatNumber(kpis.skus_analyzed) : "top"} by volume`}
             color="bg-purple-600"
-            tooltip="Total unique SKUs in the cleaned Online Retail II dataset. The simulated KPIs use the top 10 by total demand."
+            tooltip={
+              kpis?.interpretation?.metric_meanings?.dataset_sku_count ??
+              "Total unique SKUs in the cleaned Online Retail II dataset."
+            }
           />
           <KpiCard
             icon={Cpu}
@@ -510,6 +531,17 @@ export default function Dashboard() {
             tooltip="LightGBM with lag and calendar features. See README 'Forecast Evaluation' for per-class metrics against naive, seasonal-naive, moving-avg-7, and Croston baselines."
           />
         </section>
+        {kpis?.cost_savings_vs_strongest_baseline_pct !== undefined &&
+          kpis.cost_savings_vs_strongest_baseline_pct < 0 && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 px-5 py-3 text-xs text-amber-300 leading-relaxed">
+              This simulation currently shows the intelligent policy costing more than the strongest
+              baseline ({formatNumber(Math.abs(kpis.cost_savings_vs_strongest_baseline_pct), { maximumFractionDigits: 1 })}%
+              higher total cost, 95% CI [{kpis.cost_savings_vs_strongest_baseline_ci95?.[0]}%,{" "}
+              {kpis.cost_savings_vs_strongest_baseline_ci95?.[1]}%]). This is a real result from the
+              current backtest, not a display bug — see the README &quot;What I found and changed&quot;
+              section.
+            </div>
+          )}
 
         <ModelHealthCard
           snapshot={modelMonitoring}

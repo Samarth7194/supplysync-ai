@@ -175,8 +175,17 @@ export interface KpiInterpretation {
     holding_cost_per_unit: number;
     stockout_cost_per_unit: number;
     simulation_window_days: number;
+    warmup_days?: number;
   };
   metric_meanings: Record<string, string>;
+}
+
+export interface KpiSensitivityPoint {
+  stockout_to_holding_ratio: number;
+  naive_total_cost: number;
+  moving_average_rop_total_cost: number;
+  intelligent_total_cost: number;
+  cost_savings_vs_strongest_baseline_pct: number;
 }
 
 export interface KpiData {
@@ -189,6 +198,22 @@ export interface KpiData {
   intelligent_total_cost: number;
   skus_analyzed: number;
   interpretation?: KpiInterpretation;
+  // Fields added when honest multi-baseline simulation replaced the
+  // model=None demo run; optional so older cached_kpis.json still typechecks.
+  moving_average_rop_total_cost?: number;
+  strongest_baseline_method?: "naive" | "moving_average_rop";
+  strongest_baseline_total_cost?: number;
+  cost_savings_vs_strongest_baseline_pct?: number;
+  cost_savings_vs_strongest_baseline_ci95?: [number, number];
+  cost_savings_vs_naive_pct?: number;
+  model_loaded?: boolean;
+  dataset_sku_count?: number;
+  skus_requested?: number;
+  warmup_days?: number;
+  measured_days?: number;
+  lead_time_days?: number;
+  policies_compared?: string[];
+  sensitivity_to_cost_ratio?: KpiSensitivityPoint[];
 }
 
 export interface HealthStatus {

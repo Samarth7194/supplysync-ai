@@ -953,14 +953,21 @@ async def model_retraining_status(
 _KPI_INTERPRETATION = {
     "baseline": "naive",
     "baseline_description": (
-        "Fixed-threshold policy: reorder 2 weeks of average demand whenever "
-        "stock drops below 1 week of average demand."
+        "Two fixed baselines are simulated: (1) naive -- fixed-threshold policy, "
+        "reorder 2 weeks of average demand whenever stock drops below 1 week of "
+        "average demand; (2) moving_average_rop -- an (s, S) reorder-point policy "
+        "with a fixed safety stock (computed once from a warm-up window) and a "
+        "rolling moving-average demand rate. The headline savings figure is "
+        "measured against whichever of the two actually has the lower total cost "
+        "for that run (see strongest_baseline_method), not naive unconditionally."
     ),
     "intelligent_description": (
-        "Adaptive per-SKU policy: demand classified (regular / intermittent / "
-        "highly-intermittent), forecast produced by LightGBM, Croston, or a "
-        "conservative buffer, dynamic safety stock from rolling forecast error, "
-        "reorder point = lead-time demand + safety stock."
+        "Adaptive per-SKU policy running the real production forecast path: "
+        "demand classified (regular / intermittent / highly-intermittent), "
+        "evidence-based routing selects LightGBM, Croston, or a conservative "
+        "buffer per SKU, dynamic safety stock from rolling forecast error, "
+        "reorder point = lead-time demand + safety stock. All three policies "
+        "decide off inventory position (on-hand + on-order), not on-hand alone."
     ),
     "assumptions": {
         "lead_time_days": 7,
@@ -968,15 +975,23 @@ _KPI_INTERPRETATION = {
         "holding_cost_per_unit": 0.5,
         "stockout_cost_per_unit": 5.0,
         "simulation_window_days": 90,
+        "warmup_days": 14,
     },
     "metric_meanings": {
-        "cost_savings_pct": "Total cost (holding + stockout) saved by the intelligent policy relative to the naive baseline, aggregated across simulated SKUs.",
+        "cost_savings_pct": "Total cost (holding + stockout) saved by the intelligent policy relative to the naive baseline specifically, aggregated across simulated SKUs. Kept for backward compatibility; prefer cost_savings_vs_strongest_baseline_pct.",
+        "cost_savings_vs_strongest_baseline_pct": "Mean per-SKU cost savings of the intelligent policy versus whichever baseline (naive or moving_average_rop) was actually cheaper for that SKU.",
+        "cost_savings_vs_strongest_baseline_ci95": "95% confidence interval (normal approximation across simulated SKUs) around cost_savings_vs_strongest_baseline_pct.",
+        "strongest_baseline_method": "Which baseline (naive or moving_average_rop) had the lower aggregate total cost in this run.",
+        "sensitivity_to_cost_ratio": "The same recorded inventory/stockout trajectories re-weighted under several stockout:holding cost ratios, showing how sensitive the savings figure is to that assumption.",
         "fill_rate": "Fraction of demanded units that were actually fulfilled under the intelligent policy; higher is better, 1.0 = no stockouts.",
-        "naive_total_cost": "Simulated total cost (holding + stockout) of the naive baseline policy.",
+        "naive_total_cost": "Simulated total cost (holding + stockout) of the naive fixed-threshold baseline.",
+        "moving_average_rop_total_cost": "Simulated total cost of the moving-average reorder-point baseline.",
         "intelligent_total_cost": "Simulated total cost of the intelligent policy on the same SKUs and time window.",
-        "holding_cost": "Cost of units held in inventory across the simulation window.",
-        "stockout_cost": "Penalty incurred for unmet demand across the simulation window.",
-        "skus_analyzed": "How many SKUs actually produced usable simulations (>= 60 days of history and non-zero demand).",
+        "holding_cost": "Cost of units held in inventory across the measured simulation window (warm-up days excluded).",
+        "stockout_cost": "Penalty incurred for unmet demand across the measured simulation window (warm-up days excluded).",
+        "skus_analyzed": "How many SKUs actually produced usable simulations, out of skus_requested.",
+        "dataset_sku_count": "Total unique SKUs in the full cleaned dataset -- not the number simulated here.",
+        "model_loaded": "Whether a trained LightGBM artifact was actually loaded for the intelligent policy; if false, ml_lightgbm routing falls back to a moving-average forecast.",
     },
 }
 
