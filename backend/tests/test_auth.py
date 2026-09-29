@@ -138,6 +138,36 @@ def test_login_returns_400_when_mode_off(monkeypatch):
         assert r.status_code == 400
 
 
+def test_mutating_routes_require_auth_in_demo_mode(monkeypatch):
+    """PUT /api/stock/{sku} and POST /api/model-monitoring/evaluate mutate
+    persistent state and must be behind the same gate as read routes -- an
+    anonymous caller must never reach the handler."""
+    import main as backend_main
+
+    monkeypatch.setattr(backend_main, "AUTH_CONFIG", _demo_cfg(password="topsecret"))
+    with TestClient(backend_main.app) as c:
+        r = c.put("/api/stock/ABC123", json={"quantity_on_hand": 10})
+        assert r.status_code == 401
+
+        r = c.post("/api/model-monitoring/evaluate")
+        assert r.status_code == 401
+
+        # A valid API key clears the gate; any remaining failure must come
+        # from downstream (missing DB/service), never from auth.
+        monkeypatch.setattr(
+            backend_main, "AUTH_CONFIG",
+            _demo_cfg(password="topsecret"),
+        )
+        backend_main.AUTH_CONFIG = backend_main.AUTH_CONFIG.__class__(
+            mode="demo", demo_user="demo", demo_password="topsecret",
+            session_secret=b"test-secret-32-bytes-xxxxxxxxxxxx", api_key="secret-key-42",
+        )
+        r = c.put("/api/stock/ABC123", json={"quantity_on_hand": 10}, headers={"X-API-Key": "secret-key-42"})
+        assert r.status_code != 401
+        r = c.post("/api/model-monitoring/evaluate", headers={"X-API-Key": "secret-key-42"})
+        assert r.status_code != 401
+
+
 def test_api_key_still_works_in_demo_mode(monkeypatch):
     """When API_KEY is set, automation scripts can keep using the header
     even after AUTH_MODE flips to demo."""

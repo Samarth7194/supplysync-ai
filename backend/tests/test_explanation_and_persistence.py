@@ -219,6 +219,34 @@ def test_recent_analyses_endpoint_returns_what_was_written():
     assert body["items"][1]["current_stock"] == 10.0
 
 
+def test_repeated_identical_analysis_does_not_write_a_duplicate_row():
+    """Dashboard reads re-analyze the same SKU on every page load. Two calls
+    with identical inputs (same SKU, stock, lead time, service level) within
+    the dedupe window must write only one analysis_runs row, not two."""
+    from repositories.analysis_repository import AnalysisRepository
+
+    session = _session()
+    backend_main, client = _client_with_analysis_service(session, _StubDataService({"HAS": _regular_series()}))
+    try:
+        payload = {"sku": "HAS", "current_stock": 10}
+        first = client.post("/api/analyze", json=payload)
+        second = client.post("/api/analyze", json=payload)
+        assert first.status_code == 200
+        assert second.status_code == 200
+        session.commit()
+
+        assert AnalysisRepository(session).count() == 1
+
+        # A genuinely different input (stock changed) must still persist.
+        third = client.post("/api/analyze", json={"sku": "HAS", "current_stock": 999})
+        assert third.status_code == 200
+        session.commit()
+        assert AnalysisRepository(session).count() == 2
+    finally:
+        client.close()
+        _cleanup_overrides(backend_main)
+
+
 def test_recent_analyses_endpoint_reports_missing_repository():
     import main as backend_main
     from services.analysis_service import AnalysisService

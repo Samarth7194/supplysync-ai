@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Iterable, Mapping
+from datetime import datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import func, select
@@ -76,6 +78,36 @@ class AnalysisRepository:
         payload.setdefault("analysis_run_id", analysis.id)
         prediction = self.create_prediction_log(payload)
         return analysis, prediction
+
+    def find_recent_duplicate(
+        self,
+        *,
+        sku_code: str,
+        current_stock: Decimal,
+        lead_time_days: int,
+        service_level: Decimal,
+        since: datetime,
+    ) -> AnalysisRun | None:
+        """Most recent analysis run for the exact same inputs, if any, created
+        at or after ``since``.
+
+        Used to dedupe repeated dashboard reads (same SKU, same stock, same
+        assumptions, reloaded within a short window) so they don't each write
+        a fresh analysis_runs/prediction_logs row -- while a genuinely new
+        input (stock changed, assumptions changed) or an older repeat (outside
+        the TTL) still persists normally.
+        """
+        stmt = (
+            select(AnalysisRun)
+            .where(AnalysisRun.sku_code == sku_code)
+            .where(AnalysisRun.current_stock == current_stock)
+            .where(AnalysisRun.lead_time_days == lead_time_days)
+            .where(AnalysisRun.service_level == service_level)
+            .where(AnalysisRun.created_at >= since)
+            .order_by(AnalysisRun.created_at.desc(), AnalysisRun.id.desc())
+            .limit(1)
+        )
+        return self.session.scalar(stmt)
 
     def recent(self, limit: int = 20) -> list[AnalysisRun]:
         limit = max(1, min(int(limit), 200))

@@ -17,7 +17,6 @@ import {
 } from "lucide-react";
 import {
   api,
-  computeDemoStock,
   type SkuDetail,
   type SkuAnalysis,
   type KpiData,
@@ -36,6 +35,7 @@ import { ModelHealthCard } from "@/components/ModelHealthCard";
 import { SectionHeader } from "@/components/SectionHeader";
 import { env } from "@/lib/env";
 import {
+  computeDemoStock,
   formatDemandPattern,
   formatForecastMethod,
   formatNumber,
@@ -250,9 +250,8 @@ export default function Dashboard() {
           if (cancelled) return;
           const batch = skus.slice(i, i + batchSize);
           const results = await Promise.all(
-            batch.map((sku, batchIdx) => {
-              const globalIdx = i + batchIdx;
-              const demo = computeDemoStock(sku.avg_demand, globalIdx);
+            batch.map((sku) => {
+              const demo = computeDemoStock(sku.avg_demand, sku.demand_std ?? 0, sku.id);
               const stock = stockBySku[sku.id]?.quantity_on_hand ?? getStockForSku(sku.id, demo);
               return api.analyzeSku(sku.id, stock).catch(() => null);
             })
@@ -323,7 +322,7 @@ export default function Dashboard() {
   void stockVersion;
   const skuRows = filteredSkus.map((sku) => {
     const a = analyses[sku.id];
-    const demo = computeDemoStock(sku.avg_demand, skuDetails.indexOf(sku));
+    const demo = computeDemoStock(sku.avg_demand, sku.demand_std ?? 0, sku.id);
     const server = serverStock[sku.id];
     const stock = server?.quantity_on_hand ?? getStockForSku(sku.id, demo);
     const origin = server ? "server" : getStockOrigin(sku.id);

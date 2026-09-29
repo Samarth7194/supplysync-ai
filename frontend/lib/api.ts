@@ -8,6 +8,7 @@ export interface SkuDetail {
   name: string;
   avg_demand: number;
   total_demand: number;
+  demand_std?: number;
 }
 
 export type DemandSource = "request" | "historical" | "synthetic";
@@ -460,9 +461,3 @@ export class ApiClient {
 }
 
 export const api = new ApiClient();
-
-// Utility: deterministic demo stock levels
-export function computeDemoStock(avgDemand: number, index: number): number {
-  const multipliers = [0.3, 0.8, 2.0];
-  return Math.max(1, Math.round(avgDemand * multipliers[index % 3]));
-}

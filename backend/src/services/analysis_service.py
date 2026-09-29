@@ -12,7 +12,7 @@ import hashlib
 import json
 import logging
 from dataclasses import asdict, dataclass
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 from decimal import Decimal
 from pathlib import Path
 from typing import Any, Optional
@@ -632,9 +632,26 @@ class AnalysisService:
             f"level). Current stock {stock_v} already covers the reorder point - no action needed."
         )
 
+    # Dashboard reads re-analyze the same SKU on every page load with
+    # unchanged inputs; without a dedupe window that writes a fresh
+    # analysis_runs/prediction_logs row every time. A genuinely new input
+    # (stock or assumptions changed) or a repeat outside this window still
+    # persists normally, so /api/analyses/recent stays populated.
+    _DEDUPE_TTL_SECONDS = 900
+
     def _persist_analysis(self, result: AnalyzeResult, demand_series: pd.Series) -> None:
         if self.analysis_repository is not None:
             try:
+                since = datetime.now(timezone.utc) - timedelta(seconds=self._DEDUPE_TTL_SECONDS)
+                duplicate = self.analysis_repository.find_recent_duplicate(
+                    sku_code=result.sku,
+                    current_stock=Decimal(str(result.current_stock)),
+                    lead_time_days=result.decision.lead_time_days,
+                    service_level=Decimal(str(result.decision.service_level)),
+                    since=since,
+                )
+                if duplicate is not None:
+                    return
                 sku_id = self.analysis_repository.get_sku_id(result.sku)
                 model_artifact_id = self._model_artifact_id(result)
                 self.analysis_repository.create_analysis_with_prediction(

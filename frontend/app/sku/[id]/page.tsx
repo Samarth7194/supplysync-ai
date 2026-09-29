@@ -19,7 +19,6 @@ import {
   forecastSourceKind,
 } from "@/components/DataSourceBadge";
 import {
-  computeDemoStock,
   type DemandSource,
   type ForecastSource,
   type DecisionBlock,
@@ -39,6 +38,7 @@ import {
   type StockOrigin,
 } from "@/lib/stock";
 import {
+  computeDemoStock,
   formatDemandPattern,
   formatForecastMethod,
   formatNumber,
@@ -65,6 +65,7 @@ interface SkuDetail {
   name: string;
   avg_demand: number;
   total_demand: number;
+  demand_std?: number;
 }
 
 interface Analysis {
@@ -152,7 +153,6 @@ export default function SKUDetail() {
   const skuId = params.id as string;
 
   const [skuInfo, setSkuInfo] = useState<SkuDetail | null>(null);
-  const [skuIndex, setSkuIndex] = useState(0);
   const [analysis, setAnalysis] = useState<Analysis | null>(null);
   const [history, setHistory] = useState<HistoryPoint[]>([]);
   const [historyAvailable, setHistoryAvailable] = useState<boolean>(false);
@@ -212,12 +212,10 @@ export default function SKUDetail() {
       try {
         const skuRes = await fetch(`${API}/api/skus/details`, { credentials: "include" }).then((r) => r.json());
         const allSkus: SkuDetail[] = skuRes.skus || [];
-        const idx = allSkus.findIndex((s) => s.id === skuId);
-        const info = idx >= 0 ? allSkus[idx] : null;
+        const info = allSkus.find((s) => s.id === skuId) ?? null;
         setSkuInfo(info);
-        setSkuIndex(idx >= 0 ? idx : 0);
 
-        const demoStock = info ? computeDemoStock(info.avg_demand, idx) : 50;
+        const demoStock = info ? computeDemoStock(info.avg_demand, info.demand_std ?? 0, info.id) : 50;
         const serverStock = await fetchServerStock();
         const stock = serverStock?.quantity_on_hand ?? getStockForSku(skuId, demoStock);
         const origin = serverStock ? "server" : getStockOrigin(skuId);
@@ -289,7 +287,7 @@ export default function SKUDetail() {
 
   function resetStockToDemo() {
     clearStockForSku(skuId);
-    const demo = skuInfo ? computeDemoStock(skuInfo.avg_demand, skuIndex) : 50;
+    const demo = skuInfo ? computeDemoStock(skuInfo.avg_demand, skuInfo.demand_std ?? 0, skuInfo.id) : 50;
     setStockDraft(String(demo));
     setStockOrigin("demo");
     void applyAssumptions(demo, leadTimeDays, serviceLevelPct);

@@ -60,3 +60,32 @@ export function formatDemandPattern(pattern: string | null | undefined): string 
   };
   return pattern ? labels[pattern] ?? pattern : "";
 }
+
+// Deterministic demo stock levels.
+//
+// Seeded from an approximation of the SKU's own inventory position (the same
+// lead-time-demand + safety-stock reorder-point formula the backend uses),
+// not a plain multiple of average demand -- so, deterministically per SKU
+// (hashed on its id, not its position in the list), roughly a third of
+// demo SKUs land above their own reorder point and show NO_ACTION, a third
+// land right at it, and a third land below it and need a reorder.
+const DEMO_SERVICE_LEVEL_Z = 1.645; // 95% one-sided service level, matches the backend
+const DEMO_LEAD_TIME_DAYS = 7;
+
+function _stableHash(value: string): number {
+  let hash = 0;
+  for (let i = 0; i < value.length; i++) {
+    hash = (hash * 31 + value.charCodeAt(i)) | 0;
+  }
+  return Math.abs(hash);
+}
+
+export function computeDemoStock(avgDemand: number, demandStd: number, skuId: string): number {
+  const leadTimeDemand = avgDemand * DEMO_LEAD_TIME_DAYS;
+  const safetyStock = DEMO_SERVICE_LEVEL_Z * demandStd * Math.sqrt(DEMO_LEAD_TIME_DAYS);
+  const reorderPoint = leadTimeDemand + safetyStock;
+
+  const bucket = _stableHash(skuId) % 3;
+  const multipliers = [0.4, 1.0, 1.8]; // below, near, comfortably above the reorder point
+  return Math.max(0, Math.round(reorderPoint * multipliers[bucket]));
+}
