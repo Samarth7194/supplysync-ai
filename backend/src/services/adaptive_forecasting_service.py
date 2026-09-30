@@ -75,13 +75,20 @@ def croston_forecast(
 def conservative_forecast(
     demand_series: pd.Series,
     horizon: int,
-    buffer: float = 1.5,
+    buffer: float = 1.0,
 ) -> List[float]:
     """Conservative forecast for highly intermittent SKUs.
 
     Uses the full 30-day mean (including zeros) so the per-day rate is
     honest, then applies a buffer. Previously this dropped zeros *and*
     multiplied by 1.5 — effectively double-buffering for sparse SKUs.
+
+    ``buffer`` defaults to 1.0 (no buffer): a simulated-inventory-cost
+    comparison on the validation window (scripts/evaluate_highly_intermittent_policy.py)
+    showed the 1.5x buffer costing ~22% more than 1.0x at every tested
+    stockout:holding ratio (2:1 through 20:1) for highly-intermittent SKUs,
+    where safety stock (computed separately, downstream) already covers the
+    volatility buffering is meant to hedge against.
     """
     recent = demand_series.tail(30)
     avg = float(recent.mean()) if len(recent) > 0 else 0.0

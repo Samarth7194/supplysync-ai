@@ -104,12 +104,20 @@ def test_croston_length_matches_horizon():
 
 # --- Conservative Forecast Tests ---
 
-def test_conservative_has_buffer_over_average():
+def test_conservative_matches_average_by_default():
     series = pd.Series([1, 0, 2, 0, 0, 3, 0, 0, 0, 1])
     forecasts = conservative_forecast(series, horizon=7)
     simple_avg = series.tail(30).mean()
-    # Conservative applies 1.5x buffer
-    assert all(v >= simple_avg for v in forecasts)
+    # Default buffer is 1.0 (no buffer) -- a validation-window cost simulation
+    # showed a 1.5x buffer costing ~22% more for highly-intermittent SKUs.
+    assert all(v == pytest.approx(simple_avg) for v in forecasts)
+
+
+def test_conservative_buffer_is_configurable():
+    series = pd.Series([1, 0, 2, 0, 0, 3, 0, 0, 0, 1])
+    simple_avg = series.tail(30).mean()
+    forecasts = conservative_forecast(series, horizon=7, buffer=1.5)
+    assert all(v == pytest.approx(simple_avg * 1.5) for v in forecasts)
 
 
 # --- Adaptive Forecast Tests ---

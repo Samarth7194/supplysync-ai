@@ -218,6 +218,17 @@ class EnhancedInventorySimulator:
                     lead_time_days,
                     policy_kwargs.get("sigma", 1.0)
                 )
+            elif policy_name == "candidate_forecast":
+                # Re-derive the forecast fresh each day from demand observed
+                # so far, like "intelligent" does, but for an arbitrary
+                # forecast_fn(history, horizon) -> list[float] -- used to
+                # compare candidate forecast methods by simulated cost
+                # instead of WAPE (see scripts/evaluate_highly_intermittent_policy.py).
+                current_demand_history = sku_df.loc[:day_idx, "demand"]
+                forecast_fn = policy_kwargs["forecast_fn"]
+                forecast = forecast_fn(current_demand_history, lead_time_days)
+                sigma = float(current_demand_history.std()) if len(current_demand_history) > 1 else 0.0
+                order_qty = self.ml_forecast_policy(inventory_position, forecast, lead_time_days, sigma)
             elif policy_name == "intelligent":
                 # Get demand history up to current point
                 current_demand_history = sku_df.loc[:day_idx, "demand"]

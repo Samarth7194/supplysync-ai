@@ -100,6 +100,24 @@ def test_moving_average_rop_integrates_through_simulate_policy():
     assert result.fill_rate > 0.9  # a sane ROP policy should avoid most stockouts here
 
 
+def test_candidate_forecast_policy_reorders_using_a_supplied_forecast_fn():
+    """candidate_forecast re-derives the forecast fresh each day from demand
+    observed so far and feeds it through the real reorder-decision math --
+    used to compare forecast methods by simulated cost instead of WAPE."""
+    df = _make_sku_df([10] * 60)
+    sim = EnhancedInventorySimulator(holding_cost_per_unit=0.5, stockout_cost_per_unit=5.0)
+
+    def constant_forecast(history, horizon):
+        return [float(history.mean())] * horizon
+
+    result = sim.simulate_policy(
+        sku_df=df, policy_name="candidate_forecast", lead_time_days=7,
+        warmup_days=10, forecast_fn=constant_forecast,
+    )
+    assert result.measured_days == 50
+    assert result.fill_rate > 0.9  # constant demand, constant forecast -> should avoid stockouts
+
+
 def test_reweight_cost_matches_a_fresh_simulation_at_the_same_ratio():
     """reweight_cost must reproduce simulate_policy's own totals when given
     back the same cost-per-unit values it was originally run with, since no

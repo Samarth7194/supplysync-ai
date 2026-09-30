@@ -27,6 +27,7 @@ sys.path.insert(0, str(BACKEND_DIR / "src"))
 EVIDENCE_PATH = BACKEND_DIR / "data" / "forecast_evaluation_horizons.json"
 JSON_OUT = BACKEND_DIR / "data" / "forecast_error_analysis.json"
 MARKDOWN_OUT = REPO_DIR / "docs" / "forecast-evaluation.md"
+HIGHLY_INTERMITTENT_POLICY_PATH = BACKEND_DIR / "data" / "highly_intermittent_policy_evaluation.json"
 
 REFERENCE = ("predict_zero", "moving_avg_7", "seasonal_naive_7", "croston_sba")
 CLASS_ORDER = ("regular", "intermittent", "highly_intermittent", "all")
@@ -163,16 +164,51 @@ def markdown(analysis: dict, evidence: dict) -> str:
                     f"| {fmt(r['mase'])} | {r['n_origins']} | {verdict} |"
                 )
             lines += ["", f"_{n_skus} SKUs in this class at some origin._" if cls != "all" else "", ""]
+    if HIGHLY_INTERMITTENT_POLICY_PATH.exists():
+        lines += highly_intermittent_policy_section(json.loads(HIGHLY_INTERMITTENT_POLICY_PATH.read_text()))
     lines += [
         "## Caveats",
         "",
         "- One evaluation period (the last 30 days of the dataset, the run-up to Christmas). Results may differ in other seasons.",
         "- SKUs are the highest-volume SKUs by demand before the training cutoff; low-volume SKUs are under-represented.",
         "- Classes are assigned per origin from the trailing 60 days, so a SKU can appear in more than one class.",
-        "- The `production routed` row uses the legacy demand-pattern policy, not evidence routing.",
+        "- The `production routed` row reflects evidence-based routing (ModelRoutingService), gated to the legacy "
+        "demand-pattern default whenever evidence is missing, stale, or doesn't clear the improvement/baseline bars.",
         "",
     ]
     return "\n".join(lines)
+
+
+def highly_intermittent_policy_section(evidence: dict) -> list[str]:
+    """WAPE can't select a highly-intermittent policy (predict-zero always
+    "wins" WAPE there but never orders), so that class is selected by
+    simulated inventory cost instead -- see scripts/evaluate_highly_intermittent_policy.py."""
+    lines = [
+        "## Highly-intermittent policy selection (by simulated cost, not WAPE)",
+        "",
+        f"Validation window ending {evidence['validation_window_end']}, "
+        f"{evidence['n_skus_simulated']} of {evidence['n_highly_intermittent_skus']} highly-intermittent SKUs simulated "
+        f"({evidence['warmup_days']}-day warm-up + {evidence['measured_days']} measured days, "
+        f"holding=${evidence['cost_assumptions']['holding_cost_per_unit']}/unit, "
+        f"stockout=${evidence['cost_assumptions']['stockout_cost_per_unit']}/unit).",
+        "",
+        "| Candidate | Total cost | Fill rate |",
+        "|---|---:|---:|",
+    ]
+    for name, c in sorted(evidence["candidates"].items(), key=lambda kv: kv[1]["total_cost"]):
+        fill = f"{c['fill_rate']:.1%}" if c["fill_rate"] is not None else "n/a"
+        lines.append(f"| {name} | {c['total_cost']:,.0f} | {fill} |")
+    lines += [
+        "",
+        f"**Winner: `{evidence['winner_by_total_cost']}`**"
+        + (" (wins at every tested stockout:holding ratio, not just the default 10:1)."
+           if evidence["winner_at_every_tested_ratio"] else
+           " (ratio-dependent -- see the sensitivity table in the evaluation JSON)."),
+        "",
+        "Reproduce: `python scripts/evaluate_highly_intermittent_policy.py`",
+        "",
+    ]
+    return lines
 
 
 def main() -> int:
