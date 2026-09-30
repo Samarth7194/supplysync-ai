@@ -1,7 +1,7 @@
 {
   "schema_version": 2,
   "evaluation_mode": "multi_step_rolling_origin",
-  "generated_at": "2026-09-28T19:31:43.479525+00:00",
+  "generated_at": "2026-09-30T09:00:04.874727+00:00",
   "horizon_days": 7,
   "eval_days": 30,
   "stride": 1,
@@ -24,9 +24,8 @@
     "lightgbm"
   ],
   "routed_method_counts": {
-    "ml_lightgbm": 4081,
-    "conservative": 272,
-    "croston": 447
+    "croston": 4528,
+    "conservative": 272
   },
   "aggregates": {
     "all": {
@@ -38,6 +37,7 @@
         "bias": -41.378,
         "bias_ratio": -1.0,
         "mase": 1.1715,
+        "residual_sigma_daily": 103.1218,
         "n_skus": 200,
         "n_origins": 4800,
         "n_test_points": 33600
@@ -50,6 +50,7 @@
         "bias": 1.5967,
         "bias_ratio": 0.0386,
         "mase": 1.1967,
+        "residual_sigma_daily": 93.33,
         "n_skus": 200,
         "n_origins": 4800,
         "n_test_points": 33600
@@ -62,6 +63,7 @@
         "bias": 1.5967,
         "bias_ratio": 0.0386,
         "mase": 1.2578,
+        "residual_sigma_daily": 112.607,
         "n_skus": 200,
         "n_origins": 4800,
         "n_test_points": 33600
@@ -74,18 +76,20 @@
         "bias": -0.207,
         "bias_ratio": -0.005,
         "mase": 1.2898,
+        "residual_sigma_daily": 90.6649,
         "n_skus": 200,
         "n_origins": 4800,
         "n_test_points": 33600
       },
       "production_routed": {
-        "wape": 1.6891,
-        "wape_lead_time_sum": 1.347,
-        "mae": 69.8908,
-        "rmse": 119.1151,
-        "bias": 46.7495,
-        "bias_ratio": 1.1298,
-        "mase": 2.2136,
+        "wape": 0.9291,
+        "wape_lead_time_sum": 0.4796,
+        "mae": 38.4423,
+        "rmse": 90.484,
+        "bias": -0.6277,
+        "bias_ratio": -0.0152,
+        "mase": 1.157,
+        "residual_sigma_daily": 90.4818,
         "n_skus": 200,
         "n_origins": 4800,
         "n_test_points": 33600
@@ -98,6 +102,7 @@
         "bias": 57.2,
         "bias_ratio": 1.3824,
         "mase": 3.5665,
+        "residual_sigma_daily": 111.4559,
         "n_skus": 200,
         "n_origins": 4800,
         "n_test_points": 33600
@@ -112,6 +117,7 @@
         "bias": -46.1928,
         "bias_ratio": -1.0,
         "mase": 0.8732,
+        "residual_sigma_daily": 108.5583,
         "n_skus": 173,
         "n_origins": 4081,
         "n_test_points": 28567
@@ -124,6 +130,7 @@
         "bias": 2.1974,
         "bias_ratio": 0.0476,
         "mase": 0.8588,
+        "residual_sigma_daily": 98.167,
         "n_skus": 173,
         "n_origins": 4081,
         "n_test_points": 28567
@@ -136,6 +143,7 @@
         "bias": 2.1974,
         "bias_ratio": 0.0476,
         "mase": 0.911,
+        "residual_sigma_daily": 118.0337,
         "n_skus": 173,
         "n_origins": 4081,
         "n_test_points": 28567
@@ -148,18 +156,20 @@
         "bias": -1.1367,
         "bias_ratio": -0.0246,
         "mase": 0.8053,
+        "residual_sigma_daily": 94.9174,
         "n_skus": 173,
         "n_origins": 4081,
         "n_test_points": 28567
       },
       "production_routed": {
-        "wape": 1.6866,
-        "wape_lead_time_sum": 1.3507,
-        "mae": 77.9101,
-        "rmse": 126.5044,
-        "bias": 54.2028,
-        "bias_ratio": 1.1734,
-        "mase": 2.0176,
+        "wape": 0.8929,
+        "wape_lead_time_sum": 0.4438,
+        "mae": 41.2442,
+        "rmse": 94.9242,
+        "bias": -1.1367,
+        "bias_ratio": -0.0246,
+        "mase": 0.8053,
+        "residual_sigma_daily": 94.9174,
         "n_skus": 173,
         "n_origins": 4081,
         "n_test_points": 28567
@@ -172,6 +182,7 @@
         "bias": 54.2028,
         "bias_ratio": 1.1734,
         "mase": 2.0176,
+        "residual_sigma_daily": 114.304,
         "n_skus": 173,
         "n_origins": 4081,
         "n_test_points": 28567
@@ -186,6 +197,7 @@
         "bias": -15.7865,
         "bias_ratio": -1.0,
         "mase": 1.0606,
+        "residual_sigma_daily": 49.5332,
         "n_skus": 28,
         "n_origins": 447,
         "n_test_points": 3129
@@ -198,6 +210,7 @@
         "bias": -0.3455,
         "bias_ratio": -0.0219,
         "mase": 1.335,
+        "residual_sigma_daily": 51.238,
         "n_skus": 28,
         "n_origins": 447,
         "n_test_points": 3129
@@ -210,6 +223,7 @@
         "bias": -0.3455,
         "bias_ratio": -0.0219,
         "mase": 1.4521,
+        "residual_sigma_daily": 68.7153,
         "n_skus": 28,
         "n_origins": 447,
         "n_test_points": 3129
@@ -222,6 +236,7 @@
         "bias": 3.4215,
         "bias_ratio": 0.2167,
         "mase": 1.4175,
+        "residual_sigma_daily": 50.609,
         "n_skus": 28,
         "n_origins": 447,
         "n_test_points": 3129
@@ -234,6 +249,7 @@
         "bias": 3.4215,
         "bias_ratio": 0.2167,
         "mase": 1.4175,
+        "residual_sigma_daily": 50.609,
         "n_skus": 28,
         "n_origins": 447,
         "n_test_points": 3129
@@ -246,6 +262,7 @@
         "bias": 71.9128,
         "bias_ratio": 4.5553,
         "mase": 5.0581,
+        "residual_sigma_daily": 89.4876,
         "n_skus": 28,
         "n_origins": 447,
         "n_test_points": 3129
@@ -260,6 +277,7 @@
         "bias": -11.1943,
         "bias_ratio": -1.0,
         "mase": 8.1706,
+        "residual_sigma_daily": 66.9065,
         "n_skus": 13,
         "n_origins": 272,
         "n_test_points": 1904
@@ -272,6 +290,7 @@
         "bias": -4.2237,
         "bias_ratio": -0.3773,
         "mase": 8.4748,
+        "residual_sigma_daily": 69.0498,
         "n_skus": 13,
         "n_origins": 272,
         "n_test_points": 1904
@@ -284,6 +303,7 @@
         "bias": -4.2237,
         "bias_ratio": -0.3773,
         "mase": 8.5961,
+        "residual_sigma_daily": 83.2778,
         "n_skus": 13,
         "n_origins": 272,
         "n_test_points": 1904
@@ -296,18 +316,20 @@
         "bias": 7.7792,
         "bias_ratio": 0.6949,
         "mase": 11.8971,
+        "residual_sigma_daily": 74.703,
         "n_skus": 13,
         "n_origins": 272,
         "n_test_points": 1904
       },
       "production_routed": {
-        "wape": 2.2164,
-        "wape_lead_time_sum": 1.8278,
-        "mae": 24.8108,
-        "rmse": 77.7552,
-        "bias": 6.1283,
-        "bias_ratio": 0.5474,
-        "mase": 8.5975,
+        "wape": 1.7832,
+        "wape_lead_time_sum": 1.3991,
+        "mae": 19.9615,
+        "rmse": 71.1477,
+        "bias": 0.3541,
+        "bias_ratio": 0.0316,
+        "mase": 8.4428,
+        "residual_sigma_daily": 71.1468,
         "n_skus": 13,
         "n_origins": 272,
         "n_test_points": 1904
@@ -320,6 +342,7 @@
         "bias": 77.9915,
         "bias_ratio": 6.9671,
         "mase": 34.8056,
+        "residual_sigma_daily": 95.4304,
         "n_skus": 13,
         "n_origins": 272,
         "n_test_points": 1904
@@ -349,11 +372,11 @@
       },
       "methods": {
         "production_routed": {
-          "beats_strongest_baseline": false,
+          "beats_strongest_baseline": true,
           "difference_vs_strongest_baseline": {
-            "point": 0.8681968657372408,
-            "lo": 0.7163148990522941,
-            "hi": 1.0562523795291623,
+            "point": 0.0008240849019933716,
+            "lo": -0.00703566750509063,
+            "hi": 0.01339802071464074,
             "n_skus": 193
           }
         },
@@ -378,9 +401,9 @@
         "production_routed": {
           "beats_strongest_baseline": false,
           "difference_vs_strongest_baseline": {
-            "point": 0.9069259092055698,
-            "lo": 0.7434271701842027,
-            "hi": 1.118820629391063,
+            "point": 0.0,
+            "lo": 0.0,
+            "hi": 0.0,
             "n_skus": 173
           }
         },
@@ -432,9 +455,9 @@
         "production_routed": {
           "beats_strongest_baseline": false,
           "difference_vs_strongest_baseline": {
-            "point": 0.8271675893778736,
-            "lo": -0.15090737891524136,
-            "hi": 2.988143536663807,
+            "point": 0.3986534672046542,
+            "lo": -0.11918442371842874,
+            "hi": 1.5602726291947038,
             "n_skus": 7
           }
         },

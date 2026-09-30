@@ -32,9 +32,9 @@ HIGHLY_INTERMITTENT_POLICY_PATH = BACKEND_DIR / "data" / "highly_intermittent_po
 REFERENCE = ("predict_zero", "moving_avg_7", "seasonal_naive_7", "croston_sba")
 CLASS_ORDER = ("regular", "intermittent", "highly_intermittent", "all")
 CLASS_TITLES = {
-    "regular": "Regular demand (served by LightGBM in the legacy routing policy)",
-    "intermittent": "Intermittent demand (served by Croston-SBA)",
-    "highly_intermittent": "Highly intermittent demand (served by the conservative buffer)",
+    "regular": "Regular demand (LightGBM by legacy default; see production routed row for what evidence routing actually selects)",
+    "intermittent": "Intermittent demand (Croston-SBA by legacy default)",
+    "highly_intermittent": "Highly intermittent demand (conservative buffer by legacy default)",
     "all": "All SKUs pooled",
 }
 LABELS = {

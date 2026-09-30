@@ -19,7 +19,7 @@ The other half is the MLOps lifecycle. Since the demo runs on a frozen historica
 1. **Data**: UCI Online Retail II, cleaned and aggregated to ~531K daily-demand rows across ~4,900 SKUs (2009-12-01 → 2011-12-09).
 2. **Classification**: zero-demand share > 80% → highly intermittent; > 50% → intermittent; otherwise regular.
 3. **Forecasting**: a hybrid router picks LightGBM (15 features: 7 lags, 3 rolling stats, 5 calendar features), Croston-SBA, or a conservative buffer based on the classification, with a moving-average fallback if the ML path is unavailable.
-4. **Uncertainty**: rolling forecast-error sigma from logged residuals when there's enough evidence, otherwise historical demand standard deviation.
+4. **Uncertainty**: rolling forecast-error sigma from logged residuals when there's enough evidence; otherwise, an offline-backtest-derived residual sigma for that demand class; otherwise historical demand standard deviation.
 5. **Inventory decision**: lead-time demand + Z-score safety stock = reorder point; compared against current stock, then rounded through MOQ → order multiple → max-order cap.
 6. **Persistence**: every analysis writes an `analysis_runs` row and a linked `prediction_logs` row via SQLAlchemy repositories, so every forecast has an audit trail from the moment it's made.
 7. **Evaluation**: once a prediction's target window has actually passed, it's scored against real recorded demand (WAPE/MAE/RMSE/Bias/MASE) — never before the window completes.
@@ -41,7 +41,9 @@ Croston's method is built for intermittent demand: it separately tracks demand s
 
 ## How Safety Stock Works
 
-Two modes: **dynamic**, using the rolling standard deviation of recent forecast residuals (actual − predicted) when there's enough logged evidence, and **traditional**, `Z(service_level) × σ × √(lead_time_days)` otherwise. Dynamic safety stock adapts to how wrong the model has actually been recently rather than assuming a fixed distribution; the traditional formula is the safe fallback when there isn't yet enough residual history to trust a rolling estimate.
+Two modes: **dynamic**, using the rolling standard deviation of recent forecast residuals (actual − predicted) when there's enough logged evidence, and **traditional**, `Z(service_level) × σ × √(lead_time_days)` otherwise. Dynamic safety stock adapts to how wrong the model has actually been recently rather than assuming a fixed distribution.
+
+The traditional formula's σ itself has a fallback order, not just one historical number: logged SKU-method residuals → logged SKU residuals → logged demand-class residuals → an **offline-backtest-derived residual sigma for that demand class** (new: reuses the same sums the shared backtest already keeps for bias/RMSE, so it's not a separate computation) → historical demand standard deviation, only as the last resort. A fresh deployment with zero logged predictions still gets a real forecast-error sigma from the committed backtest instead of falling straight to raw demand volatility, which overstates uncertainty for well-forecastable SKUs and understates it for genuinely erratic ones.
 
 ## How Forecasts Become Reorder Decisions
 
@@ -83,7 +85,7 @@ Because of a real, since-fixed bug, plus a genuine limit of the model on this da
 ## What I Would Improve Next
 
 - Close the remaining regular-demand gap: even the best retrained LightGBM candidate (tweedie objective, wider training data, SKU-profile features) doesn't beat Croston-SBA on that class yet (0.489 vs 0.444 WAPE).
-- Investigate why the KPI/ROI simulation's intelligent policy currently costs *more* than the naive baseline (-9% aggregate, -13% mean per-SKU) once it's actually running the real model and evidence-based routing — it only wins at a high stockout:holding cost ratio (20:1) in the current sensitivity sweep.
+- Investigate why the KPI/ROI simulation's aggregate cost (-1.7% vs. naive, close to break-even) and mean per-SKU savings (-30.5%, 95% CI entirely negative) diverge so sharply on the held-out window — a handful of low-cost SKUs likely swing the mean, but that's not yet confirmed per-SKU.
 - Add real feature/input-distribution drift detection alongside the existing forecast-performance monitoring.
 - Connect a live ERP/POS feed so live monitoring can accumulate genuine new evidence instead of relying on historical replay.
 - Move to probabilistic (quantile or conformal) forecasting instead of the current residual-based uncertainty approximation.
@@ -125,7 +127,7 @@ Add an ingestion adapter that writes into the same `skus`/demand-history shape t
 No. It's decision support — it returns a recommended order quantity and the reasoning behind it; a human or a separate procurement system would act on it.
 
 **How is forecast uncertainty computed?**
-From the standard deviation of recent forecast residuals (actual − predicted) when there's enough logged evidence for that SKU/method/horizon combination; otherwise it falls back to the historical demand standard deviation.
+From the standard deviation of recent forecast residuals (actual − predicted) when there's enough logged evidence for that SKU/method/horizon combination; if not, from that demand class's residual sigma in the offline backtest (reusing sums the backtest already computes, not a new pass); only then does it fall back to the historical demand standard deviation.
 
 **What database do you use and why SQLAlchemy + Alembic?**
 PostgreSQL in production (SQLite locally for convenience), with SQLAlchemy repositories so route handlers never touch the ORM directly, and Alembic-managed migrations so schema changes are versioned and CI-validated (including a full upgrade → downgrade → upgrade round-trip against a real Postgres container).
@@ -135,3 +137,9 @@ It's covered by tests that assert a candidate with no completed retraining run, 
 
 **What's the single most interesting bug you found while building this?**
 A race in the promotion rollback-restore path: recovering from a failed runtime handoff could reactivate the previous artifact before deactivating the target *in the same flush*, momentarily violating the one-active-artifact database constraint. Fixed by explicitly ordering deactivate-then-flush before reactivate-then-flush.
+
+**Did evidence-based routing actually work once you turned it on?**
+The routing *logic* did — I verified `ModelRoutingService.select_method()` directly and it correctly picked Croston over LightGBM for regular demand. But the backtest script that reports "what does production actually do" never passed it a routing service at all, so every "production routed" number in every table was silently the legacy default relabeled, not a real measurement. The fix was a one-line constructor argument; finding it required distrusting a friendly-looking number (a WAPE that happened to equal LightGBM's exactly, for every regular-class origin) rather than assuming the pipeline that reported it was correct just because it ran without errors.
+
+**Why did fixing three real bugs make the KPI simulation's per-SKU result worse?**
+It didn't uniformly get worse — the aggregate dollar cost improved (-9.0% → -1.7% vs. naive) and fill rate improved (86.8% → 90.5%), because regular-demand SKUs now get better forecasts and highly-intermittent SKUs get a cheaper buffer. But the *mean per-SKU* percentage swung the other way (-13.0% → -30.5%, with the 95% CI now entirely negative). That's a real, currently-unexplained divergence between a ratio-of-sums metric and a mean-of-ratios metric, most likely driven by a handful of low-absolute-cost SKUs swinging heavily in percentage terms — reported as found, not smoothed over, and flagged as follow-up work.

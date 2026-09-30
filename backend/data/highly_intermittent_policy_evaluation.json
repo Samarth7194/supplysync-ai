@@ -13,7 +13,7 @@
       "total_cost": 1232856.0,
       "fill_rate": 0.6683
     },
-    "conservative_x1.5_current": {
+    "conservative_x1.5_old_default": {
       "total_cost": 1504482.0,
       "fill_rate": 0.7103
     },
@@ -33,28 +33,28 @@
   "sensitivity_to_cost_ratio": {
     "2.0": {
       "conservative_x1.0": 1153552.0,
-      "conservative_x1.5_current": 1435234.0,
+      "conservative_x1.5_old_default": 1435234.0,
       "conservative_x2.0": 1727325.5,
       "croston_sba": 1621014.0,
       "simple_average_7d": 1477383.5
     },
     "5.0": {
       "conservative_x1.0": 1183291.0,
-      "conservative_x1.5_current": 1461202.0,
+      "conservative_x1.5_old_default": 1461202.0,
       "conservative_x2.0": 1750332.5,
       "croston_sba": 1647939.0,
       "simple_average_7d": 1501985.0
     },
     "10.0": {
       "conservative_x1.0": 1232856.0,
-      "conservative_x1.5_current": 1504482.0,
+      "conservative_x1.5_old_default": 1504482.0,
       "conservative_x2.0": 1788677.5,
       "croston_sba": 1692814.0,
       "simple_average_7d": 1542987.5
     },
     "20.0": {
       "conservative_x1.0": 1331986.0,
-      "conservative_x1.5_current": 1591042.0,
+      "conservative_x1.5_old_default": 1591042.0,
       "conservative_x2.0": 1865367.5,
       "croston_sba": 1782564.0,
       "simple_average_7d": 1624992.5

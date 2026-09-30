@@ -1,27 +1,27 @@
 {
   "provenance": "historical_replay",
-  "generated_at": "2026-09-04T16:51:24.824278+00:00",
+  "generated_at": "2026-09-30T09:09:33.421806+00:00",
   "model_name": "lightgbm_demand_forecast",
   "model_artifact_id": null,
   "model_version": "lightgbm_demand_forecast-20260523T084002Z-ea7815fa9a33",
   "horizon_days": 7,
-  "sku_count": 59,
+  "sku_count": 60,
   "window_count": 3,
   "status": "warning",
-  "degradation_reason": "wape_warning_threshold_exceeded",
-  "degradation_message": "Recent WAPE is 17.4% worse than baseline. Baseline provenance is offline_backtest, so this is a bootstrap comparison, not live production truth.",
-  "evaluation_count": 39,
-  "metric_wape": 1.2507646497510045,
-  "metric_mae": 92.22671208603562,
-  "metric_rmse": 228.4911777756881,
-  "metric_bias": 21.117258662538312,
-  "metric_mase": 1.2341948717948719,
-  "residual_mean": -21.117258662538312,
-  "residual_std": 227.93109091746715,
-  "baseline_wape": 1.0655,
+  "degradation_reason": "bias_warning",
+  "degradation_message": "Forecast bias ratio is 107.2%, above the configured warning threshold.",
+  "evaluation_count": 56,
+  "metric_wape": 1.5763252788052613,
+  "metric_mae": 100.67571346981767,
+  "metric_rmse": 201.8990476066524,
+  "metric_bias": 68.4436950154199,
+  "metric_mase": 1.9032982142857142,
+  "residual_mean": -68.4436950154199,
+  "residual_std": 190.18664225287836,
+  "baseline_wape": 1.6866,
   "baseline_provenance": "offline_backtest",
-  "wape_relative_change": 0.17387578578226623,
-  "bias_ratio": 0.2863890519062573,
+  "wape_relative_change": -0.06538285378556788,
+  "bias_ratio": 1.0716539561449354,
   "consecutive_degradation_count": 0,
   "historical_period": {
     "start": "2011-11-19",
@@ -29,20 +29,28 @@
   },
   "method_breakdown": {
     "ml_lightgbm": {
-      "sku_count": 47,
-      "evaluation_count": 133,
-      "wape": 1.1370213346773157
+      "sku_count": 56,
+      "evaluation_count": 167,
+      "wape": 1.4298819364016015
     },
     "croston": {
-      "sku_count": 11,
-      "evaluation_count": 31,
-      "wape": 0.7898414212097774
+      "sku_count": 2,
+      "evaluation_count": 4,
+      "wape": 0.9835702429858849
     },
     "conservative": {
-      "sku_count": 1,
-      "evaluation_count": 3,
-      "wape": 4.063720930232559
+      "sku_count": 3,
+      "evaluation_count": 9,
+      "wape": 2.151925741202549
     }
+  },
+  "baseline_scope": {
+    "method": "ml_lightgbm",
+    "demand_class": "regular",
+    "horizon_days": 7,
+    "forecast_mode": "multi_step_rolling_origin",
+    "metric": "daily_wape",
+    "history_window_days": 60
   },
   "windows": [
     {
@@ -50,12 +58,12 @@
       "anchor_date": "2011-11-18",
       "target_start": "2011-11-19",
       "target_end": "2011-11-25",
-      "status": "stable",
-      "degradation_reason": "wape_within_baseline",
+      "status": "warning",
+      "degradation_reason": "bias_warning",
       "consecutive_degradation_count": 0,
-      "metric_wape": 1.0948828504642347,
-      "evaluation_count": 47,
-      "sku_count": 59
+      "metric_wape": 1.199050292310243,
+      "evaluation_count": 55,
+      "sku_count": 60
     },
     {
       "window_index": 1,
@@ -65,9 +73,9 @@
       "status": "warning",
       "degradation_reason": "bias_warning",
       "consecutive_degradation_count": 0,
-      "metric_wape": 1.08139065863978,
-      "evaluation_count": 47,
-      "sku_count": 59
+      "metric_wape": 1.509193009571855,
+      "evaluation_count": 56,
+      "sku_count": 60
     },
     {
       "window_index": 2,
@@ -75,11 +83,11 @@
       "target_start": "2011-12-03",
       "target_end": "2011-12-09",
       "status": "warning",
-      "degradation_reason": "wape_warning_threshold_exceeded",
+      "degradation_reason": "bias_warning",
       "consecutive_degradation_count": 0,
-      "metric_wape": 1.2507646497510045,
-      "evaluation_count": 39,
-      "sku_count": 49
+      "metric_wape": 1.5763252788052613,
+      "evaluation_count": 56,
+      "sku_count": 60
     }
   ]
 }

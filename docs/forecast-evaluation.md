@@ -14,22 +14,22 @@
 
 200 SKUs, 4800 forecast origins (first origin 2011-11-09, last origin 2011-12-02; dataset ends 2011-12-09; models were not trained on data after 2011-11-09).
 
-Hybrid routing used: {"conservative": 272, "croston": 447, "ml_lightgbm": 4081}
+Hybrid routing used: {"conservative": 272, "croston": 4528}
 
-### Regular demand (served by LightGBM in the legacy routing policy)
+### Regular demand (LightGBM by legacy default; see production routed row for what evidence routing actually selects)
 
 | Method | WAPE (lead-time sum) | WAPE (daily) | Bias | MASE | Origins | vs strongest baseline (95% CI) |
 |---|---:|---:|---:|---:|---:|---|
 | Croston-SBA | 0.444 | 0.893 | -2% | 0.805 | 4081 | strongest baseline |
+| production routed (hybrid) | 0.444 | 0.893 | -2% | 0.805 | 4081 | +0.000 [+0.000, +0.000] |
 | 7-day moving average | 0.544 | 0.950 | +5% | 0.859 | 4081 | reference |
 | seasonal naive (7) | 0.544 | 0.992 | +5% | 0.911 | 4081 | reference |
 | predict zero | 1.000 | 1.000 | -100% | 0.873 | 4081 | reference |
 | LightGBM (production artifact) | 1.351 | 1.687 | +117% | 2.018 | 4081 | +0.907 [+0.743, +1.119] |
-| production routed (hybrid) | 1.351 | 1.687 | +117% | 2.018 | 4081 | +0.907 [+0.743, +1.119] |
 
 _173 SKUs in this class at some origin._
 
-### Intermittent demand (served by Croston-SBA)
+### Intermittent demand (Croston-SBA by legacy default)
 
 | Method | WAPE (lead-time sum) | WAPE (daily) | Bias | MASE | Origins | vs strongest baseline (95% CI) |
 |---|---:|---:|---:|---:|---:|---|
@@ -42,14 +42,14 @@ _173 SKUs in this class at some origin._
 
 _28 SKUs in this class at some origin._
 
-### Highly intermittent demand (served by the conservative buffer)
+### Highly intermittent demand (conservative buffer by legacy default)
 
 | Method | WAPE (lead-time sum) | WAPE (daily) | Bias | MASE | Origins | vs strongest baseline (95% CI) |
 |---|---:|---:|---:|---:|---:|---|
 | predict zero | 1.000 | 1.000 | -100% | 8.171 | 272 | strongest baseline |
 | 7-day moving average | 1.227 | 1.322 | -38% | 8.475 | 272 | reference |
 | seasonal naive (7) | 1.227 | 1.467 | -38% | 8.596 | 272 | reference |
-| production routed (hybrid) | 1.828 | 2.216 | +55% | 8.598 | 272 | +0.827 [-0.151, +2.988] |
+| production routed (hybrid) | 1.399 | 1.783 | +3% | 8.443 | 272 | +0.399 [-0.119, +1.560] |
 | Croston-SBA | 2.067 | 2.437 | +69% | 11.897 | 272 | reference |
 | LightGBM (production artifact) | 7.374 | 8.206 | +697% | 34.806 | 272 | +2.928 [+0.678, +9.700] |
 
@@ -59,11 +59,11 @@ _13 SKUs in this class at some origin._
 
 | Method | WAPE (lead-time sum) | WAPE (daily) | Bias | MASE | Origins | vs strongest baseline (95% CI) |
 |---|---:|---:|---:|---:|---:|---|
+| production routed (hybrid) | 0.480 | 0.929 | -2% | 1.157 | 4800 | +0.001 [-0.007, +0.013] |
 | Croston-SBA | 0.490 | 0.939 | -0% | 1.290 | 4800 | strongest baseline |
 | 7-day moving average | 0.566 | 0.971 | +4% | 1.197 | 4800 | reference |
 | seasonal naive (7) | 0.566 | 1.019 | +4% | 1.258 | 4800 | reference |
 | predict zero | 1.000 | 1.000 | -100% | 1.171 | 4800 | reference |
-| production routed (hybrid) | 1.347 | 1.689 | +113% | 2.214 | 4800 | +0.868 [+0.716, +1.056] |
 | LightGBM (production artifact) | 1.560 | 1.915 | +138% | 3.567 | 4800 | +1.014 [+0.836, +1.212] |
 
 
@@ -72,22 +72,22 @@ _13 SKUs in this class at some origin._
 
 200 SKUs, 3400 forecast origins (first origin 2011-11-09, last origin 2011-11-25; dataset ends 2011-12-09; models were not trained on data after 2011-11-09).
 
-Hybrid routing used: {"conservative": 194, "croston": 311, "ml_lightgbm": 2895}
+Hybrid routing used: {"conservative": 194, "croston": 3206}
 
-### Regular demand (served by LightGBM in the legacy routing policy)
+### Regular demand (LightGBM by legacy default; see production routed row for what evidence routing actually selects)
 
 | Method | WAPE (lead-time sum) | WAPE (daily) | Bias | MASE | Origins | vs strongest baseline (95% CI) |
 |---|---:|---:|---:|---:|---:|---|
 | Croston-SBA | 0.387 | 0.910 | +1% | 0.809 | 2895 | strongest baseline |
+| production routed (hybrid) | 0.387 | 0.910 | +1% | 0.809 | 2895 | +0.000 [+0.000, +0.000] |
 | 7-day moving average | 0.506 | 0.984 | +12% | 0.877 | 2895 | reference |
 | seasonal naive (7) | 0.506 | 1.051 | +12% | 0.943 | 2895 | reference |
 | predict zero | 1.000 | 1.000 | -100% | 0.866 | 2895 | reference |
 | LightGBM (production artifact) | 2.083 | 2.385 | +197% | 2.840 | 2895 | +1.696 [+1.381, +2.051] |
-| production routed (hybrid) | 2.083 | 2.385 | +197% | 2.840 | 2895 | +1.696 [+1.381, +2.051] |
 
 _173 SKUs in this class at some origin._
 
-### Intermittent demand (served by Croston-SBA)
+### Intermittent demand (Croston-SBA by legacy default)
 
 | Method | WAPE (lead-time sum) | WAPE (daily) | Bias | MASE | Origins | vs strongest baseline (95% CI) |
 |---|---:|---:|---:|---:|---:|---|
@@ -100,14 +100,14 @@ _173 SKUs in this class at some origin._
 
 _26 SKUs in this class at some origin._
 
-### Highly intermittent demand (served by the conservative buffer)
+### Highly intermittent demand (conservative buffer by legacy default)
 
 | Method | WAPE (lead-time sum) | WAPE (daily) | Bias | MASE | Origins | vs strongest baseline (95% CI) |
 |---|---:|---:|---:|---:|---:|---|
 | 7-day moving average | 0.932 | 1.114 | -75% | 4.836 | 194 | strongest baseline |
 | seasonal naive (7) | 0.932 | 1.104 | -75% | 4.804 | 194 | reference |
 | predict zero | 1.000 | 1.000 | -100% | 4.535 | 194 | reference |
-| production routed (hybrid) | 1.628 | 2.061 | +33% | 4.913 | 194 | +0.696 [-0.014, +1.978] |
+| production routed (hybrid) | 1.250 | 1.686 | -11% | 4.777 | 194 | +0.318 [-0.033, +0.759] |
 | Croston-SBA | 1.932 | 2.517 | +77% | 9.233 | 194 | reference |
 | LightGBM (production artifact) | 7.555 | 8.762 | +754% | 42.276 | 194 | +3.045 [+0.592, +11.887] |
 
@@ -117,18 +117,34 @@ _12 SKUs in this class at some origin._
 
 | Method | WAPE (lead-time sum) | WAPE (daily) | Bias | MASE | Origins | vs strongest baseline (95% CI) |
 |---|---:|---:|---:|---:|---:|---|
+| production routed (hybrid) | 0.421 | 0.944 | +1% | 1.044 | 3400 | +0.004 [-0.006, +0.021] |
 | Croston-SBA | 0.433 | 0.959 | +3% | 1.228 | 3400 | strongest baseline |
 | 7-day moving average | 0.522 | 0.998 | +10% | 1.098 | 3400 | reference |
 | seasonal naive (7) | 0.522 | 1.067 | +10% | 1.163 | 3400 | reference |
 | predict zero | 1.000 | 1.000 | -100% | 1.053 | 3400 | reference |
-| production routed (hybrid) | 2.030 | 2.345 | +187% | 2.808 | 3400 | +1.613 [+1.323, +1.979] |
 | LightGBM (production artifact) | 2.303 | 2.634 | +219% | 4.812 | 3400 | +1.805 [+1.482, +2.162] |
 
 
+
+## Highly-intermittent policy selection (by simulated cost, not WAPE)
+
+Validation window ending 2011-11-09, 611 of 964 highly-intermittent SKUs simulated (14-day warm-up + 90 measured days, holding=$0.5/unit, stockout=$5.0/unit).
+
+| Candidate | Total cost | Fill rate |
+|---|---:|---:|
+| conservative_x1.0 | 1,232,856 | 66.8% |
+| conservative_x1.5_old_default | 1,504,482 | 71.0% |
+| simple_average_7d | 1,542,988 | 72.6% |
+| croston_sba | 1,692,814 | 70.0% |
+| conservative_x2.0 | 1,788,678 | 74.3% |
+
+**Winner: `conservative_x1.0`** (wins at every tested stockout:holding ratio, not just the default 10:1).
+
+Reproduce: `python scripts/evaluate_highly_intermittent_policy.py`
 
 ## Caveats
 
 - One evaluation period (the last 30 days of the dataset, the run-up to Christmas). Results may differ in other seasons.
 - SKUs are the highest-volume SKUs by demand before the training cutoff; low-volume SKUs are under-represented.
 - Classes are assigned per origin from the trailing 60 days, so a SKU can appear in more than one class.
-- The `production routed` row uses the legacy demand-pattern policy, not evidence routing.
+- The `production routed` row reflects evidence-based routing (ModelRoutingService), gated to the legacy demand-pattern default whenever evidence is missing, stale, or doesn't clear the improvement/baseline bars.

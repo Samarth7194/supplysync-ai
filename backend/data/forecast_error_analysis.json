@@ -12,9 +12,8 @@
       "n_skus": 200,
       "n_origins": 4800,
       "routed_method_counts": {
-        "ml_lightgbm": 4081,
-        "conservative": 272,
-        "croston": 447
+        "croston": 4528,
+        "conservative": 272
       },
       "model_artifacts": {
         "production": {
@@ -39,6 +38,25 @@
             "n_origins": 4081,
             "beats_strongest_baseline": null,
             "difference_vs_strongest_baseline": null
+          },
+          {
+            "method": "production_routed",
+            "is_reference": false,
+            "is_strongest_baseline": false,
+            "wape_lead_time_sum": 0.4438,
+            "wape_daily": 0.8929,
+            "mae": 41.2442,
+            "bias_ratio": -0.0246,
+            "mase": 0.8053,
+            "n_skus": 173,
+            "n_origins": 4081,
+            "beats_strongest_baseline": false,
+            "difference_vs_strongest_baseline": {
+              "point": 0.0,
+              "lo": 0.0,
+              "hi": 0.0,
+              "n_skus": 173
+            }
           },
           {
             "method": "moving_avg_7",
@@ -84,25 +102,6 @@
           },
           {
             "method": "lightgbm",
-            "is_reference": false,
-            "is_strongest_baseline": false,
-            "wape_lead_time_sum": 1.3507,
-            "wape_daily": 1.6866,
-            "mae": 77.9101,
-            "bias_ratio": 1.1734,
-            "mase": 2.0176,
-            "n_skus": 173,
-            "n_origins": 4081,
-            "beats_strongest_baseline": false,
-            "difference_vs_strongest_baseline": {
-              "point": 0.9069259092055698,
-              "lo": 0.7434271701842027,
-              "hi": 1.118820629391063,
-              "n_skus": 173
-            }
-          },
-          {
-            "method": "production_routed",
             "is_reference": false,
             "is_strongest_baseline": false,
             "wape_lead_time_sum": 1.3507,
@@ -264,18 +263,18 @@
             "method": "production_routed",
             "is_reference": false,
             "is_strongest_baseline": false,
-            "wape_lead_time_sum": 1.8278,
-            "wape_daily": 2.2164,
-            "mae": 24.8108,
-            "bias_ratio": 0.5474,
-            "mase": 8.5975,
+            "wape_lead_time_sum": 1.3991,
+            "wape_daily": 1.7832,
+            "mae": 19.9615,
+            "bias_ratio": 0.0316,
+            "mase": 8.4428,
             "n_skus": 13,
             "n_origins": 272,
             "beats_strongest_baseline": false,
             "difference_vs_strongest_baseline": {
-              "point": 0.8271675893778736,
-              "lo": -0.15090737891524136,
-              "hi": 2.988143536663807,
+              "point": 0.3986534672046542,
+              "lo": -0.11918442371842874,
+              "hi": 1.5602726291947038,
               "n_skus": 7
             }
           },
@@ -314,6 +313,25 @@
           }
         ],
         "all": [
+          {
+            "method": "production_routed",
+            "is_reference": false,
+            "is_strongest_baseline": false,
+            "wape_lead_time_sum": 0.4796,
+            "wape_daily": 0.9291,
+            "mae": 38.4423,
+            "bias_ratio": -0.0152,
+            "mase": 1.157,
+            "n_skus": 200,
+            "n_origins": 4800,
+            "beats_strongest_baseline": true,
+            "difference_vs_strongest_baseline": {
+              "point": 0.0008240849019933716,
+              "lo": -0.00703566750509063,
+              "hi": 0.01339802071464074,
+              "n_skus": 193
+            }
+          },
           {
             "method": "croston_sba",
             "is_reference": true,
@@ -371,25 +389,6 @@
             "difference_vs_strongest_baseline": null
           },
           {
-            "method": "production_routed",
-            "is_reference": false,
-            "is_strongest_baseline": false,
-            "wape_lead_time_sum": 1.347,
-            "wape_daily": 1.6891,
-            "mae": 69.8908,
-            "bias_ratio": 1.1298,
-            "mase": 2.2136,
-            "n_skus": 200,
-            "n_origins": 4800,
-            "beats_strongest_baseline": false,
-            "difference_vs_strongest_baseline": {
-              "point": 0.8681968657372408,
-              "lo": 0.7163148990522941,
-              "hi": 1.0562523795291623,
-              "n_skus": 193
-            }
-          },
-          {
             "method": "lightgbm",
             "is_reference": false,
             "is_strongest_baseline": false,
@@ -422,9 +421,8 @@
       "n_skus": 200,
       "n_origins": 3400,
       "routed_method_counts": {
-        "ml_lightgbm": 2895,
-        "conservative": 194,
-        "croston": 311
+        "croston": 3206,
+        "conservative": 194
       },
       "model_artifacts": {
         "production": {
@@ -449,6 +447,25 @@
             "n_origins": 2895,
             "beats_strongest_baseline": null,
             "difference_vs_strongest_baseline": null
+          },
+          {
+            "method": "production_routed",
+            "is_reference": false,
+            "is_strongest_baseline": false,
+            "wape_lead_time_sum": 0.3873,
+            "wape_daily": 0.9102,
+            "mae": 41.1149,
+            "bias_ratio": 0.0091,
+            "mase": 0.8092,
+            "n_skus": 173,
+            "n_origins": 2895,
+            "beats_strongest_baseline": false,
+            "difference_vs_strongest_baseline": {
+              "point": 0.0,
+              "lo": 0.0,
+              "hi": 0.0,
+              "n_skus": 173
+            }
           },
           {
             "method": "moving_avg_7",
@@ -494,25 +511,6 @@
           },
           {
             "method": "lightgbm",
-            "is_reference": false,
-            "is_strongest_baseline": false,
-            "wape_lead_time_sum": 2.0833,
-            "wape_daily": 2.3854,
-            "mae": 107.7518,
-            "bias_ratio": 1.9661,
-            "mase": 2.8399,
-            "n_skus": 173,
-            "n_origins": 2895,
-            "beats_strongest_baseline": false,
-            "difference_vs_strongest_baseline": {
-              "point": 1.695981123994155,
-              "lo": 1.3808089049174324,
-              "hi": 2.051420581899451,
-              "n_skus": 173
-            }
-          },
-          {
-            "method": "production_routed",
             "is_reference": false,
             "is_strongest_baseline": false,
             "wape_lead_time_sum": 2.0833,
@@ -674,18 +672,18 @@
             "method": "production_routed",
             "is_reference": false,
             "is_strongest_baseline": false,
-            "wape_lead_time_sum": 1.6278,
-            "wape_daily": 2.0611,
-            "mae": 25.4816,
-            "bias_ratio": 0.332,
-            "mase": 4.9131,
+            "wape_lead_time_sum": 1.2501,
+            "wape_daily": 1.6857,
+            "mae": 20.8402,
+            "bias_ratio": -0.112,
+            "mase": 4.7771,
             "n_skus": 12,
             "n_origins": 194,
             "beats_strongest_baseline": false,
             "difference_vs_strongest_baseline": {
-              "point": 0.6961909583655969,
-              "lo": -0.014437547245501895,
-              "hi": 1.9778824000270692,
+              "point": 0.3184962376158994,
+              "lo": -0.03260852692916611,
+              "hi": 0.7587568673147258,
               "n_skus": 7
             }
           },
@@ -724,6 +722,25 @@
           }
         ],
         "all": [
+          {
+            "method": "production_routed",
+            "is_reference": false,
+            "is_strongest_baseline": false,
+            "wape_lead_time_sum": 0.4214,
+            "wape_daily": 0.9443,
+            "mae": 38.4393,
+            "bias_ratio": 0.0106,
+            "mase": 1.044,
+            "n_skus": 200,
+            "n_origins": 3400,
+            "beats_strongest_baseline": true,
+            "difference_vs_strongest_baseline": {
+              "point": 0.004069908465548722,
+              "lo": -0.005589995938121573,
+              "hi": 0.020536725130857428,
+              "n_skus": 193
+            }
+          },
           {
             "method": "croston_sba",
             "is_reference": true,
@@ -779,25 +796,6 @@
             "n_origins": 3400,
             "beats_strongest_baseline": null,
             "difference_vs_strongest_baseline": null
-          },
-          {
-            "method": "production_routed",
-            "is_reference": false,
-            "is_strongest_baseline": false,
-            "wape_lead_time_sum": 2.0304,
-            "wape_daily": 2.3447,
-            "mae": 95.4435,
-            "bias_ratio": 1.8674,
-            "mase": 2.8077,
-            "n_skus": 200,
-            "n_origins": 3400,
-            "beats_strongest_baseline": false,
-            "difference_vs_strongest_baseline": {
-              "point": 1.613082417196751,
-              "lo": 1.322572817756277,
-              "hi": 1.9787046623701534,
-              "n_skus": 193
-            }
           },
           {
             "method": "lightgbm",

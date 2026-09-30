@@ -45,7 +45,7 @@ SENSITIVITY_RATIOS = [2.0, 5.0, 10.0, 20.0]
 
 CANDIDATES = {
     "conservative_x1.0": partial(conservative_forecast, buffer=1.0),
-    "conservative_x1.5_current": partial(conservative_forecast, buffer=1.5),
+    "conservative_x1.5_old_default": partial(conservative_forecast, buffer=1.5),
     "conservative_x2.0": partial(conservative_forecast, buffer=2.0),
     "croston_sba": croston_forecast,
     "simple_average_7d": simple_average_forecast,
