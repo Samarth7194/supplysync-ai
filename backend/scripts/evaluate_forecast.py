@@ -41,6 +41,7 @@ sys.path.insert(0, str(BACKEND_DIR / "src"))
 from config.settings import load_settings  # noqa: E402
 from evaluation import backtest as bt  # noqa: E402
 from features.schema import feature_columns_for_version, FEATURE_SCHEMA_VERSION  # noqa: E402
+from services.model_routing_service import ModelRoutingService  # noqa: E402
 
 DEFAULT_HORIZONS = [7, 14]
 DEFAULT_MAX_SKUS = 500
@@ -97,7 +98,18 @@ def build_forecasters(args: argparse.Namespace, artifacts: dict[str, tuple]) -> 
     prod = artifacts.get("production")
     if prod is not None:
         model, columns, _ = prod
-        forecasters[bt.PRODUCTION_ROUTED] = bt.production_forecaster(model, columns)
+        # Same routing_service construction as AnalysisService._routing_service()
+        # and compute_kpis.py, reading whatever evidence is currently committed
+        # -- this is what /api/analyze actually consults today, not a
+        # hypothetical. Without this, "production_routed" silently fell back to
+        # the legacy per-pattern default (always ml_lightgbm for regular) no
+        # matter what the evidence said, because ModelRoutingService was never
+        # invoked at all.
+        routing_service = ModelRoutingService(
+            settings=load_settings().forecasting,
+            offline_evaluation_path=BACKEND_DIR / "data" / "forecast_evaluation.json",
+        )
+        forecasters[bt.PRODUCTION_ROUTED] = bt.production_forecaster(model, columns, routing_service=routing_service)
         forecasters[bt.LIGHTGBM] = bt.lightgbm_forecaster(model, columns)
     for label, (model, columns, _) in artifacts.items():
         if label == "production":
@@ -142,6 +154,12 @@ def run(args: argparse.Namespace) -> dict[str, dict]:
     daily = pd.read_parquet(parquet_path)
     daily["date"] = pd.to_datetime(daily["date"])
     dataset_end = daily["date"].max()
+    if args.eval_window == "validation":
+        # Pretend the dataset ends HELD_OUT_DAYS earlier so every downstream
+        # step (SKU ranking, series padding, origins) is computed as if the
+        # held-out window doesn't exist yet -- not just skipped in reporting.
+        dataset_end = bt.validation_dataset_end(dataset_end)
+        daily = daily[daily["date"] <= dataset_end]
     cutoff = dataset_end - pd.Timedelta(days=args.eval_days)
 
     skus = bt.select_eval_skus(daily, cutoff=cutoff, min_active_days=60, max_skus=args.max_skus)
@@ -213,27 +231,38 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--stride", type=int, default=1)
     parser.add_argument("--model", action="append", metavar="LABEL=PKL", help="Extra LightGBM artifact to score as lightgbm_<LABEL>.")
     parser.add_argument("--no-write", action="store_true", help="Print results without touching backend/data.")
+    parser.add_argument(
+        "--eval-window", choices=["held_out", "validation"], default="held_out",
+        help=(
+            "'held_out' (default): last HELD_OUT_DAYS days, unchanged production behavior -- "
+            "this is what ModelRoutingService reads and what gets reported at the end of a "
+            "method-selection task. 'validation': the VALIDATION_DAYS before that, written to "
+            "separate *_validation.json files, for making method/policy decisions without ever "
+            "looking at the held-out window."
+        ),
+    )
     args = parser.parse_args(argv)
 
     payloads = run(args)
     if args.no_write:
         return 0
 
+    suffix = "_validation" if args.eval_window == "validation" else ""
     primary = load_settings().inventory.default_lead_time_days
     primary_key = str(primary) if str(primary) in payloads else next(iter(payloads))
     out_dir = BACKEND_DIR / "data"
     out_dir.mkdir(parents=True, exist_ok=True)
-    (out_dir / "forecast_evaluation.json").write_text(json.dumps(payloads[primary_key], indent=2))
-    (out_dir / "forecast_evaluation_horizons.json").write_text(json.dumps({
+    (out_dir / f"forecast_evaluation{suffix}.json").write_text(json.dumps(payloads[primary_key], indent=2))
+    (out_dir / f"forecast_evaluation_horizons{suffix}.json").write_text(json.dumps({
         "schema_version": bt.SCHEMA_VERSION,
         "evaluation_mode": bt.EVALUATION_MODE,
         "generated_at": datetime.now(timezone.utc).isoformat(),
         "horizons_requested": args.horizons,
         "horizons": payloads,
     }, indent=2))
-    _write_csv(out_dir / "forecast_evaluation.csv", {primary_key: payloads[primary_key]})
-    _write_csv(out_dir / "forecast_evaluation_horizons.csv", payloads)
-    print(f"\nSaved backend/data/forecast_evaluation*.json/.csv (primary horizon {primary_key})")
+    _write_csv(out_dir / f"forecast_evaluation{suffix}.csv", {primary_key: payloads[primary_key]})
+    _write_csv(out_dir / f"forecast_evaluation_horizons{suffix}.csv", payloads)
+    print(f"\nSaved backend/data/forecast_evaluation{suffix}*.json/.csv (primary horizon {primary_key})")
     return 0
 
 

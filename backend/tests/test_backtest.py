@@ -195,6 +195,37 @@ def test_production_routed_records_which_method_was_used():
     assert set(result.routed_method_counts) <= {"ml_lightgbm", "croston", "conservative", "simple_average"}
 
 
+def test_production_forecaster_uses_the_routing_service_when_given_one():
+    """Real bug: evaluate_forecast.py built production_forecaster() without
+    ever passing a routing_service, so "production_routed" always used the
+    legacy per-pattern default (ml_lightgbm) no matter what the evidence
+    said -- ModelRoutingService.select_method() was never even called. A
+    routing_service whose evidence favors Croston must actually change what
+    production_forecaster returns."""
+    from services.model_routing_service import RoutingDecision
+
+    class _StubRouter:
+        def select_method(self, **kwargs):
+            return RoutingDecision(
+                selected_method="croston", default_method="ml_lightgbm",
+                selection_source="offline", evidence_level="pattern",
+                reason="test evidence favors croston", fallback_used=False,
+            )
+
+    forecaster = bt.production_forecaster(_LinearModel(), FEATURE_COLUMNS, routing_service=_StubRouter())
+    forecast = forecaster("A", _series(), 7)
+
+    assert forecast.method == "croston"
+
+
+# ---------------------------------------------------------------- eval windows
+
+
+def test_validation_dataset_end_is_held_out_days_before_the_real_end():
+    end = pd.Timestamp("2011-12-09")
+    assert bt.validation_dataset_end(end) == end - pd.Timedelta(days=bt.HELD_OUT_DAYS)
+
+
 # ---------------------------------------------------------------- selection
 
 

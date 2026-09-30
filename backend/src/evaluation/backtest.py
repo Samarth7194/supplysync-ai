@@ -51,6 +51,21 @@ LIGHTGBM = "lightgbm"
 
 DEMAND_CLASSES = ("regular", "intermittent", "highly_intermittent")
 
+# Evaluation discipline: the last HELD_OUT_DAYS of the dataset are reported
+# exactly once, at the end of a method/policy-selection task. Every decision
+# made along the way (which method wins, which safety-stock source to use,
+# etc.) must be based on VALIDATION_DAYS -- the window immediately before
+# that -- never on the held-out window itself.
+HELD_OUT_DAYS = 30
+VALIDATION_DAYS = 30
+
+
+def validation_dataset_end(dataset_end: pd.Timestamp) -> pd.Timestamp:
+    """The dataset_end to use for validation-window work: pretend the dataset
+    ends HELD_OUT_DAYS earlier, so validation decisions never see, and can
+    never leak from, the held-out window."""
+    return pd.Timestamp(dataset_end) - pd.Timedelta(days=HELD_OUT_DAYS)
+
 
 @dataclass(frozen=True)
 class Forecast:
