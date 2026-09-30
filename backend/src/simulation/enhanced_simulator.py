@@ -102,6 +102,7 @@ class EnhancedInventorySimulator:
         lead_time_days: int,
         intelligent_service: IntelligentInventoryService,
         routing_service=None,
+        uncertainty_service=None,
     ) -> int:
         """Full intelligent policy with adaptive forecasting and uncertainty."""
 
@@ -111,6 +112,7 @@ class EnhancedInventorySimulator:
             demand_history=demand_history,
             lead_time_days=lead_time_days,
             routing_service=routing_service,
+            uncertainty_service=uncertainty_service,
         )
 
         return decision["order_quantity"]
@@ -239,6 +241,7 @@ class EnhancedInventorySimulator:
                     lead_time_days,
                     policy_kwargs.get("intelligent_service"),
                     routing_service=policy_kwargs.get("routing_service"),
+                    uncertainty_service=policy_kwargs.get("uncertainty_service"),
                 )
             else:
                 order_qty = 0

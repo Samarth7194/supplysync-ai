@@ -806,6 +806,7 @@ class AnalysisService:
                 getattr(forecasting_settings, "uncertainty_min_residual_observations", 30)
             ),
             lookback_days=int(getattr(forecasting_settings, "uncertainty_residual_lookback_days", 365)),
+            offline_evaluation_path=self.backend_dir / "data" / "forecast_evaluation.json",
         )
 
     def _policy_for_request(self, request: Any) -> dict[str, Any]:

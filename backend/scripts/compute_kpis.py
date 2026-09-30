@@ -47,6 +47,7 @@ from simulation.enhanced_simulator import EnhancedInventorySimulator, reweight_c
 from services.intelligent_inventory_service import IntelligentInventoryService
 from services.model_service import ModelService, ModelArtifactValidationError
 from services.model_routing_service import ModelRoutingService
+from services.forecast_uncertainty_service import ForecastUncertaintyService
 from config.forecasting import load_forecasting_settings
 
 MODEL_NAME = "lightgbm_demand_forecast"
@@ -112,6 +113,14 @@ def compute():
         settings=load_forecasting_settings(),
         offline_evaluation_path=os.path.join(BACKEND_DIR, "data", "forecast_evaluation.json"),
     )
+    # No DB session in this standalone script, so repository=None -- falls
+    # straight to the offline (backtest) residual sigma, same evidence file
+    # as routing, then historical demand std if that's also unavailable.
+    uncertainty_service = ForecastUncertaintyService(
+        repository=None,
+        data_service=None,
+        offline_evaluation_path=os.path.join(BACKEND_DIR, "data", "forecast_evaluation.json"),
+    )
 
     simulator = EnhancedInventorySimulator(
         holding_cost_per_unit=HOLDING_COST_PER_UNIT,
@@ -164,6 +173,7 @@ def compute():
                 warmup_days=WARMUP_DAYS,
                 intelligent_service=intelligent_service,
                 routing_service=routing_service,
+                uncertainty_service=uncertainty_service,
             )
 
             per_sku_results.append({

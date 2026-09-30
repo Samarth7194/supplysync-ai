@@ -2,14 +2,20 @@
 
 from __future__ import annotations
 
+import json
+import logging
 from dataclasses import asdict, dataclass
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any, Iterable
 
 import numpy as np
 import pandas as pd
 
+from evaluation.backtest import EVALUATION_MODE, SCHEMA_VERSION
 from repositories.forecast_evaluation_repository import ForecastEvaluationRepository
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -40,15 +46,17 @@ class ForecastUncertaintyService:
     def __init__(
         self,
         *,
-        repository: ForecastEvaluationRepository,
+        repository: ForecastEvaluationRepository | None,
         data_service: Any,
         min_residual_observations: int = 30,
         lookback_days: int = 365,
+        offline_evaluation_path: str | Path | None = None,
     ):
         self.repository = repository
         self.data_service = data_service
         self.min_residual_observations = max(2, int(min_residual_observations))
         self.lookback_days = max(1, int(lookback_days))
+        self.offline_evaluation_path = Path(offline_evaluation_path) if offline_evaluation_path else None
 
     def select_sigma(
         self,
@@ -94,6 +102,20 @@ class ForecastUncertaintyService:
                     demand_pattern=demand_pattern,
                 )
 
+        offline = self._offline_pattern_sigma(demand_pattern=demand_pattern, horizon_days=horizon_days)
+        if offline is not None:
+            sigma, sample_size = offline
+            return UncertaintyEstimate(
+                source="offline_pattern_residuals",
+                sigma=sigma,
+                sample_count=sample_size,
+                lookback_days=self.lookback_days,
+                fallback_used=False,
+                method=forecast_method,
+                horizon_days=horizon_days,
+                demand_pattern=demand_pattern,
+            )
+
         safe_sigma = float(historical_sigma) if np.isfinite(historical_sigma) and historical_sigma > 0 else 0.0
         return UncertaintyEstimate(
             source="historical_demand_std",
@@ -115,6 +137,8 @@ class ForecastUncertaintyService:
         forecast_method: str | None = None,
         demand_class: str | None = None,
     ) -> np.ndarray:
+        if self.repository is None:
+            return np.asarray([], dtype=float)
         predictions = self.repository.evaluated_prediction_logs(
             horizon_days=horizon_days,
             generated_after=generated_after,
@@ -151,6 +175,54 @@ class ForecastUncertaintyService:
 
         predicted = np.asarray(forecast[:expected_days], dtype=float)
         return list(actual - predicted)
+
+    def _offline_pattern_sigma(self, *, demand_pattern: str, horizon_days: int) -> tuple[float, int] | None:
+        """Fall back to the validation/held-out backtest's own residual sigma
+        for this demand class when no logged (DB) evidence exists yet -- e.g.
+        a fresh deployment with no prediction history. Uses production_routed
+        specifically: the method actually serving this class today, not
+        whichever reference happens to be cheapest.
+        """
+        if self.offline_evaluation_path is None or not self.offline_evaluation_path.exists():
+            return None
+        try:
+            with self.offline_evaluation_path.open() as fh:
+                payload = json.load(fh)
+        except (OSError, json.JSONDecodeError) as exc:
+            logger.warning("Offline uncertainty evidence unreadable: %s", exc)
+            return None
+
+        resolved = payload
+        if payload.get("horizon_days") != horizon_days:
+            horizons = payload.get("horizons")
+            sibling_matched = None
+            if not isinstance(horizons, dict):
+                sibling = self.offline_evaluation_path.with_name(
+                    self.offline_evaluation_path.stem + "_horizons" + self.offline_evaluation_path.suffix
+                )
+                if sibling.exists():
+                    try:
+                        horizons = (json.loads(sibling.read_text()) or {}).get("horizons")
+                    except (OSError, json.JSONDecodeError) as exc:
+                        logger.warning("Multi-horizon offline uncertainty evidence unreadable: %s", exc)
+                        horizons = None
+            if isinstance(horizons, dict):
+                sibling_matched = horizons.get(str(horizon_days))
+            if not isinstance(sibling_matched, dict):
+                return None
+            resolved = sibling_matched
+
+        if resolved.get("schema_version") != SCHEMA_VERSION or resolved.get("evaluation_mode") != EVALUATION_MODE:
+            return None
+
+        metrics = ((resolved.get("aggregates") or {}).get(demand_pattern) or {}).get("production_routed")
+        if not isinstance(metrics, dict):
+            return None
+        sigma = metrics.get("residual_sigma_daily")
+        sample_size = metrics.get("n_test_points") or 0
+        if sigma is None or sigma <= 0 or sample_size < self.min_residual_observations:
+            return None
+        return float(sigma), int(sample_size)
 
     @staticmethod
     def _sigma(residuals: np.ndarray) -> float | None:

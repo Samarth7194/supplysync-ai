@@ -60,7 +60,10 @@ def test_analyze_returns_decision_block_with_all_fields():
         assert d["service_level"] == pytest.approx(0.95)
         assert d["inventory_gap"] >= 0
         assert isinstance(d["why"], str) and len(d["why"]) > 40
-        assert d["uncertainty"]["source"] in {"historical_demand_std", "sku_method_residuals", "sku_residuals", "pattern_residuals"}
+        assert d["uncertainty"]["source"] in {
+            "historical_demand_std", "sku_method_residuals", "sku_residuals",
+            "pattern_residuals", "offline_pattern_residuals",
+        }
 
 
 def test_decision_why_explains_order_when_stock_low():

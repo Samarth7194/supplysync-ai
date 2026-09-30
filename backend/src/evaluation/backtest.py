@@ -300,6 +300,15 @@ class _Sums:
         def ratio(num: float, den: float) -> float | None:
             return round(num / den, 4) if den > 0 else None
 
+        # Daily residual sigma (pred - actual), for safety stock -- population
+        # std from the same sums already kept for bias/RMSE, not a separate
+        # pass: var = E[err^2] - E[err]^2.
+        residual_sigma_daily = None
+        if self.n_days > 1:
+            mean_err = self.sum_err / self.n_days
+            variance = max(0.0, self.sum_sq_err / self.n_days - mean_err ** 2)
+            residual_sigma_daily = round(math.sqrt(variance), 4)
+
         return {
             "wape": ratio(self.sum_abs_err, self.sum_actual),
             "wape_lead_time_sum": ratio(self.lt_sum_abs_err, self.lt_sum_actual),
@@ -308,6 +317,7 @@ class _Sums:
             "bias": round(self.sum_err / self.n_days, 4) if self.n_days else None,
             "bias_ratio": ratio(self.sum_err, self.sum_actual),
             "mase": round(self.mase_num / self.mase_den, 4) if self.mase_den else None,
+            "residual_sigma_daily": residual_sigma_daily,
             "n_skus": len(self.skus),
             "n_origins": self.n_origins,
             "n_test_points": self.n_days,

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from datetime import date, datetime, timezone
 from decimal import Decimal
 
@@ -10,6 +11,7 @@ from sqlalchemy.orm import sessionmaker
 from sqlalchemy.pool import StaticPool
 
 from db.models import AnalysisRun, Base, ForecastEvaluation, PredictionLog
+from evaluation.backtest import EVALUATION_MODE, SCHEMA_VERSION
 from repositories.forecast_evaluation_repository import ForecastEvaluationRepository
 from services.forecast_uncertainty_service import ForecastUncertaintyService
 
@@ -160,3 +162,86 @@ def test_wrong_horizon_residuals_are_ignored():
 
     assert estimate.source == "historical_demand_std"
     assert estimate.sigma == 8.0
+
+
+def _write_offline_evidence(path, *, demand_pattern="regular", horizon_days=7, sigma=4.5, n_test_points=100):
+    payload = {
+        "schema_version": SCHEMA_VERSION,
+        "evaluation_mode": EVALUATION_MODE,
+        "horizon_days": horizon_days,
+        "aggregates": {
+            demand_pattern: {
+                "production_routed": {"residual_sigma_daily": sigma, "n_test_points": n_test_points},
+            },
+        },
+    }
+    path.write_text(json.dumps(payload))
+
+
+def test_offline_pattern_sigma_used_when_no_db_evidence_exists(tmp_path):
+    """A fresh deployment with no logged predictions yet must still get a
+    real residual sigma from the committed backtest, not silently fall
+    straight through to historical demand std."""
+    session = _session()
+    offline_path = tmp_path / "forecast_evaluation.json"
+    _write_offline_evidence(offline_path, sigma=4.5, n_test_points=100)
+    service = ForecastUncertaintyService(
+        repository=ForecastEvaluationRepository(session),
+        data_service=_DataService({}),
+        min_residual_observations=30,
+        offline_evaluation_path=offline_path,
+    )
+
+    estimate = service.select_sigma(
+        sku_code="SKU-1", forecast_method="croston", demand_pattern="regular",
+        horizon_days=7, historical_sigma=99.0,
+    )
+
+    assert estimate.source == "offline_pattern_residuals"
+    assert estimate.sigma == 4.5
+    assert estimate.sample_count == 100
+    assert estimate.fallback_used is False
+
+
+def test_offline_pattern_sigma_ignored_when_sample_too_small(tmp_path):
+    session = _session()
+    offline_path = tmp_path / "forecast_evaluation.json"
+    _write_offline_evidence(offline_path, sigma=4.5, n_test_points=5)
+    service = ForecastUncertaintyService(
+        repository=ForecastEvaluationRepository(session),
+        data_service=_DataService({}),
+        min_residual_observations=30,
+        offline_evaluation_path=offline_path,
+    )
+
+    estimate = service.select_sigma(
+        sku_code="SKU-1", forecast_method="croston", demand_pattern="regular",
+        horizon_days=7, historical_sigma=8.0,
+    )
+
+    assert estimate.source == "historical_demand_std"
+    assert estimate.sigma == 8.0
+
+
+def test_offline_pattern_sigma_ignored_when_schema_does_not_match(tmp_path):
+    session = _session()
+    offline_path = tmp_path / "forecast_evaluation.json"
+    offline_path.write_text(json.dumps({
+        "schema_version": 1,  # not the multi-step backtest schema
+        "evaluation_mode": "one_step_ahead",
+        "horizon_days": 7,
+        "aggregates": {"regular": {"production_routed": {"residual_sigma_daily": 4.5, "n_test_points": 100}}},
+    }))
+    service = ForecastUncertaintyService(
+        repository=ForecastEvaluationRepository(session),
+        data_service=_DataService({}),
+        min_residual_observations=30,
+        offline_evaluation_path=offline_path,
+    )
+
+    estimate = service.select_sigma(
+        sku_code="SKU-1", forecast_method="croston", demand_pattern="regular",
+        horizon_days=7, historical_sigma=8.0,
+    )
+
+    assert estimate.source == "historical_demand_std"

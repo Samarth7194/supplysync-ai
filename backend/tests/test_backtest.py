@@ -218,6 +218,23 @@ def test_production_forecaster_uses_the_routing_service_when_given_one():
     assert forecast.method == "croston"
 
 
+def test_residual_sigma_daily_is_population_std_of_signed_residuals():
+    """residual_sigma_daily feeds the safety-stock formula as a daily sigma;
+    a forecaster with a constant offset (no variance in its error) must
+    report zero, not the offset itself (that's bias, tested separately)."""
+    series = pd.Series([10.0] * 40, index=pd.date_range("2020-01-01", periods=40, freq="D"))
+
+    def constant_offset_forecaster(sku, history, horizon):
+        return bt.Forecast((15.0,) * horizon, "offset")  # always +5 over actual, never varies
+
+    result = bt.run_backtest(
+        {"A": series}, {"offset": constant_offset_forecaster}, bt.BacktestConfig(horizon=3, eval_days=10)
+    )
+    metrics = result.aggregates["all"]["offset"]
+    assert metrics["residual_sigma_daily"] == pytest.approx(0.0, abs=1e-6)
+    assert metrics["bias"] == pytest.approx(5.0)
+
+
 # ---------------------------------------------------------------- eval windows
 
 
